@@ -1,8 +1,9 @@
 ---
-title: "Kiet's study analyzed by Avijit"
+title: "Dynamics of resistance genes concentrations after antimicrobial treatment"
 output:
   html_document:
     toc: true
+    toc_depth: 4
 editor_options: 
   chunk_output_type: console
 ---
@@ -11,15 +12,32 @@ editor_options:
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
-## Packages
+## Required packages
+
+We need the following packages:
 
 ```{r}
-library(readxl)
-library(purrr)
-library(dplyr)
-library(stringr)
-library(tidyr)
-library(magrittr)
+required_packages <- c("readxl",
+                       "purrr",
+                       "dplyr",
+                       "stringr",
+                       "tidyr",
+                       "magrittr",
+                       "AMR")
+```
+
+Installing those that are not already installed on the system:
+
+```{r}
+for (package in required_packages) {
+  if (!package %in% installed.packages()) install.packages(package)
+}
+```
+
+Loading the packages:
+
+```{r message = FALSE}
+devnull <- lapply(required_packages, require, character.only = TRUE)
 ```
 
 ## Loading the data
@@ -42,15 +60,20 @@ classes <- read_excel("FarmvsClass.xlsx")
 
 ### Resistance genes concentrations
 
-Resistance genes concentrations in chicken:
+The names of the farms:
 
 ```{r}
-farms <- paste0("K", c(formatC(6:9, 1, flag = "0"), 11:26))
+(farms <- paste0("K", c(formatC(6:9, 1, flag = "0"), 11:26)))
+```
 
+Let's start by looking at the resistance genes concentrations in chicken only
+(maybe we'll look at the rat data later on):
+
+```{r}
 genes <- farms %>%
   map(read_excel, path = "KietAnalysisData.xlsx") %>% 
   map(filter, Group.1 %in% c("Chicken-Control", "Chicken-Treatment")) %>% 
-  map(select, -Group.1) %>% 
+  map(select, -Group.1, -TotalLog2Value) %>% 
   setNames(farms)
 ```
 
@@ -89,8 +112,8 @@ tmp
 ```
 
 For the farms where the "Before" measurement is missing in the control group,
-let's just use the "Before" measurement of the treatment group. First, we need
-this function:
+let's just use the "Before" measurement of the treatment group. For that, we
+need the following function where `x` is a dataframe for one farm:
 
 ```{r}
 control_before <- function(x) {
@@ -101,7 +124,7 @@ control_before <- function(x) {
 }
 ```
 
-Now we can use this function to make the fix:
+Let's now we can use this function on all the farms that needed to be fixed:
 
 ```{r}
 farms_to_fix <- tmp %>% 
@@ -109,7 +132,7 @@ farms_to_fix <- tmp %>%
   str_remove(".Group")
 
 fixed_farms <- genes %>% 
-  extract(farms_to_fix) %>% 
+  magrittr::extract(farms_to_fix) %>% 
   map(control_before)
 
 genes[farms_to_fix] <- fixed_farms
@@ -118,33 +141,42 @@ genes[farms_to_fix] <- fixed_farms
 Names of resistance genes:
 
 ```{r}
-resistance_genes <- setdiff(names(genes[[1]]),
-                          c("FarmID", "Group", "Sample_Name", "SamplingDay", "TotalLog2Value"))
+(resistance_genes <- setdiff(names(genes[[1]]),
+                             c("FarmID", "Group", "Sample_Name", "SamplingDay")))
 ```
 
-## Computing sums of resistance genes
+## Preparing the data
 
-The antimicrobial classes to which each resistance gene corresponds:
+### Computing sums of resistance genes
+
+Here we compute aggregates of resistance genes, these aggregates being the sum
+of all the resistance genes but also the sum of all the resistance genes by
+class of antimicrobial against which they are effective. The correspondence
+between resistance genes and antimicrobial resistance is in the `classes`
+data frame:
+
+```{r}
+classes
+```
+
+Let's add a category `All` that corresponds to all the resistance genes:
+
+```{r}
+classes %<>% 
+  bind_rows(data.frame(EvaGreen_Name = resistance_genes,
+                       Antimicrobial_Class = "All"))
+```
+
+The antimicrobial classes to which each resistance gene corresponds are now:
 
 ```{r}
 (classes_names <- unique(classes$Antimicrobial_Class))
 ```
 
-```{r}
-cln <- classes_names[1]
-
-ttt <- classes %>%
-  filter(Antimicrobial_Class == cln) %>% 
-  pull(EvaGreen_Name)
-
-rowSums(genes[[1]][ttt])
-```
+The following function calculates the sum of the genes concentration for a given
+class `am_class` for the data frame of a given farm `farm`:
 
 ```{r}
-farm <- genes[[1]]
-
-am_class <- classes_names[1]
-
 sum_by_class <- function(am_class, farm) {
   classes %>%
     filter(Antimicrobial_Class == am_class) %>% 
@@ -152,28 +184,90 @@ sum_by_class <- function(am_class, farm) {
     extract(farm, .) %>% 
     rowSums()
 }
+```
 
+The following function uses the one above and adds as many variables as
+antimicrobial classes to the data frame of a given farm:
+
+```{r}
 add_sums_by_class <- function(farm) {
   farm %>%
     map_dfc(classes_names, sum_by_class, .) %>% 
     setNames(classes_names) %>% 
-    bind_cols(genes[[1]], .)
+    bind_cols(farm, .)
 }
-
-map(genes[1:2], add_sums_by_class)
-
-genes[[3]]
 ```
+
+Let's add the sums of concentrations to all the farms:
+
+```{r message  = FALSE}
+genes %<>% map(add_sums_by_class)
+```
+
+### Antimicrobial classes for AMU
+
+The classes of the antimicrobials used:
+
+To work out the classes of antimicrobials used we first need to define a hash
+table that allows to match classes names as found by the `AMR` package and the
+classes names recorded in our `amu` data:
 
 ```{r}
-sort(unique(amu$AAI))
+#          AMR package:                  amu dataset:
+hash <- c("Aminoglycosides"           = "Aminoglycoside",
+          "Amphenicols"               = "Phenicol",
+          "Antifungals/antimycotics"  = "Antifungals/antimycotics",
+          "Beta-lactams/penicillins"  = "Beta-Lactam",
+          "Cephalosporins (3rd gen.)" = "Beta-Lactam",
+          "Macrolides/lincosamides"   = "MLSB",
+          "Other antibacterials"      = "Other",
+          "Polymyxins"                = "Polymyxin",
+          "Quinolones"                = "Quinolone",
+          "Tetracyclines"             = "Tetracycline",
+          "Trimethoprims"             = "Sulfonamide")
 ```
+
+Let's generate the correspondence data frame:
 
 ```{r}
-resistance_genes
+amu_classes <- amu %>% 
+  select(AAI) %>% 
+  unique() %>% 
+  mutate(group = map_chr(AAI, ab_group),
+         class = hash[group])
+
+amu_classes
 ```
 
-## Plotting the data per farm and gene
+Let's check for missing values:
+
+```{r}
+amu_classes %>% 
+  filter(is.na(AAI) | is.na(group) | is.na(class))
+```
+
+Let's fix it manually:
+
+```{r}
+amu_classes[amu_classes$AAI == "bromhexine", "class"] <- "Mucoactive agent"
+```
+
+Finally, we can use `amu_classes` to make another hash table:
+
+```{r}
+hash <- with(amu_classes, setNames(class, AAI))
+```
+
+And we can use this new hash table to add the antimicrobial class to the `amu`
+dataframe:
+
+```{r}
+(amu %<>% mutate(class = hash[AAI]))
+```
+
+## Data visualization
+
+### Plotting the raw data per farm and gene
 
 The time points:
 
@@ -195,69 +289,95 @@ genes %<>% map(mutate,
   map(arrange, Group, SamplingDay2) # making sure that data are arranged chronologically
 ```
 
-A customized `lines()` function:
+Some customized `lines()` and `points()` function:
 
 ```{r}
-lines2 <- function(...) lines(..., type = "o", lwd = 2)
+lines2 <- function(...) lines(..., lwd = 2)
 ```
 
-A function that plots a given gene concentration as a function of time for
-control and treatment:
+A utility function for the function `plot_gene_concentration()` that follows
+after. This function adds the dots and lines to a plot:
 
 ```{r}
-plot_gene_concentration <- function(farm, antimicrobial, text) {
-  farm_dataset <- genes[[farm]]
-  
-  plot(farm_dataset$SamplingDay2, farm_dataset[[antimicrobial]], type = "n",
-       xlim = c(-8, 120), xlab = "time (days)", ylab = "gene concentration")
-
-  controls <- filter(farm_dataset, Group == "Control")
-  treatments <- filter(farm_dataset, Group == "Treatment")
-
-  lines2(controls$SamplingDay2, controls[[antimicrobial]], col = "blue")
-  lines2(treatments$SamplingDay2, treatments[[antimicrobial]], col = "red")
-  
-  mtext(text)
+plot_data <- function(x, gene, col, lwd = 2, lty = 3) {
+  lines2 <- function(...) lines(..., col = col, lwd = lwd)
+  nrows <- nrow(x)
+  x2 <- x[-c(1, nrows), ]
+  x3 <- x[1:2, ]
+  x4 <- x[(nrows - 1):nrows, ]
+  points(x$SamplingDay2, x[[gene]], col = col, lwd = lwd)
+  lines2(x2$SamplingDay2, x2[[gene]])
+  lines2(x3$SamplingDay2, x3[[gene]], lty = lty)
+  lines2(x4$SamplingDay2, x4[[gene]], lty = lty)
 }
 ```
 
-Plotting aac3-liacde for control and treatment in farm K06
+The following function plots a given gene concentration as a function of time
+for control and treatment:
+
+```{r}
+plot_gene_concentration <- function(farm, gene, text) {
+  farm_dataset <- genes[[farm]]
+  
+  plot(farm_dataset$SamplingDay2, farm_dataset[[gene]], type = "n",
+       xlim = c(-10, 120), xlab = "time after treatment (days)",
+       ylab = "gene concentration", axes = FALSE)
+  ats <- c(-7, seq(0, 120, 20))
+  lbs <- ats
+  lbs[1] <- "before"
+  lbs[length(lbs)] <- "end"
+  axis(1, ats, lbs)
+  axis(2)
+
+  farm_dataset %>%
+    filter(Group == "Control") %>% 
+    plot_data(gene, "blue")
+  
+  farm_dataset %>%
+    filter(Group == "Treatment") %>% 
+    plot_data(gene, "red")
+
+  mtext(text)
+  abline(v = 0)
+}
+```
+
+Plotting `aac3-liacde` for control and treatment in farm K06
 
 ```{r}
 plot_gene_concentration(farms[1], resistance_genes[1], resistance_genes[1])
 ```
 
-Number of columns we want:
+#### Plotting all the genes for a given farm
+
+Number of columns we want and some graph tuning:
 
 ```{r}
 ncols <- 3
+plt_val <- c(.13, .92, .22, .9)
 ```
 
 Plotting all the genes for the first farm:
 
-```{r fig.height = ceiling(length(resistance_genes) / ncols) * (1 + 2 / 3)}
-opar <- par(mfrow = c(ceiling(length(resistance_genes) / ncols), ncols),
-            plt   = c(.13, .92, .22, .9))
-
+```{r fig.height = ceiling(length(resistance_genes) / ncols) * (1 + 2 / 3), fig.width = 2.45 * ncols}
+opar <- par(mfrow = c(ceiling(length(resistance_genes) / ncols), ncols), plt = plt_val)
 walk(resistance_genes, ~ plot_gene_concentration(farms[1], .x, .x))
-
 par(opar)
 ```
+
+#### Plotting all the farms for a given gene
 
 Plotting all the farms for the first gene:
 
-```{r fig.height = ceiling(length(farms) / ncols) * (1 + 2 / 3)}
-opar <- par(mfrow = c(ceiling(length(farms) / ncols), ncols),
-            plt   = c(.13, .92, .22, .9))
-
+```{r fig.height = ceiling(length(farms) / ncols) * (1 + 2 / 3), fig.width = 2.45 * ncols}
+opar <- par(mfrow = c(ceiling(length(farms) / ncols), ncols), plt   = plt_val)
 walk(farms, ~ plot_gene_concentration(.x, resistance_genes[1], .x))
-
 par(opar)
 ```
 
-## Gathering farms data
+### Gathering data per gene
 
-### Standardizing the data
+#### Standardizing the data
 
 Let's now try to standardize the gene concentrations by the gene concentration
 before treatment. This function standardizes one experiment:
@@ -270,8 +390,7 @@ standardize_by_before_ <- function(x) {
 }
 ```
 
-This function standardizes the control of and the treatment experiments of a
-farm:
+This function standardizes the control and the treatment experiments of a farm:
 
 ```{r}
 standardize_by_before <- function(x) {
@@ -297,28 +416,35 @@ plot_frame <- function(...) {
 }
 ```
 
-### Experiments time series
+#### Experiments time series
 
 Now, we can start exploring various option of plotting the data, starting with
 this function:
 
 ```{r}
-plot_gene_all_farms <- function(antimicrobial) {
-  tmp <- genes_standardized %>% 
-    map(extract, c("Group", "SamplingDay2", antimicrobial))
+plot_gene_all_farms <- function(gene, infinity = -1000) {
+  transformation <- function(x) {
+    x[, 3] <- log10(x[, 3])
+    x
+  }
+  
+  tmp <- genes_standardized %>%
+    map(extract, c("Group", "SamplingDay2", gene)) %>%
+    map(transformation)
 
   tmp2 <- bind_rows(tmp)
   plot_frame(tmp2[[2]], tmp2[[3]])
 
-  tmp %>%
-    map(filter, Group == "Control") %>% 
-    walk(~ lines2(.x[[2]], .x[[3]], col = "blue"))
-
-  tmp %>%
-    map(filter, Group == "Treatment") %>% 
-    walk(~ lines2(.x[[2]], .x[[3]], col = "red"))
+  a <- tmp %>% 
+    map(function(x) {x[[3]] <- replace(x[[3]], is.infinite(x[[3]]), infinity); x}) %>% 
+    map(~ split(.x, .x$Group)) %>% 
+    unlist(recursive = FALSE) %>% 
+    map(mutate, col = c("blue", "red")[(Group == "Treatment") + 1]) %>% 
+    sample() %>% 
+    walk(~ lines2(.x[[2]], .x[[3]], col = .x$col))
   
-  mtext(antimicrobial)
+  mtext(gene)
+  abline(h = 0)
   legend("topright", legend = c("treatment", "control"), col = c("red", "blue"),
          lty = 1, lwd = 2, bty = "n")
 }
@@ -327,10 +453,10 @@ plot_gene_all_farms <- function(antimicrobial) {
 Let's try it on one antimicrobial:
 
 ```{r}
-plot_gene_all_farms(resistance_genes[1])
+plot_gene_all_farms(resistance_genes[1], -1000)
 ```
 
-### Boxplots
+#### Boxplots
 
 Let's try an alternative visualization, using this following function for
 box-plots:
@@ -381,7 +507,7 @@ plot_gene_all_farms_boxplot(resistance_genes[1])
 Mmmm... For some reason, interquartiles ranges look a bit weird on some of these
 boxplots. Not sure how this is calculated but I don't really like it.
 
-### Violin plots
+#### Violin plots
 
 Let's try a violin plot instead, by using this function:
 
@@ -431,7 +557,7 @@ plot_gene_all_farms_violin(resistance_genes[1])
 
 Not sure I like it either...
 
-### Paired treatment and control
+#### Paired treatment and control
 
 Let's plot paired treatment and control for each farm instead. For that, we need
 the following function:
@@ -463,9 +589,9 @@ Let's try it:
 plot_gene_all_farms_pairwise(resistance_genes[1])
 ```
 
-## Differences between treatment and control
+### Differences between treatment and control
 
-### Experiment time series
+#### Experiment time series
 
 Let's plot the difference between treatment and control for each farm. For that,
 we need the following function:
@@ -494,7 +620,7 @@ Let's try it:
 plot_differences(resistance_genes[1])
 ```
 
-### Boxplots
+#### Boxplots
 
 Let's consider this function with boxplots:
 
@@ -528,7 +654,7 @@ plot_differences_boxplot(resistance_genes[1])
 
 The boxplot still looks weird.
 
-### Violin plots
+#### Violin plots
 
 Let's look at the violin alternative:
 
@@ -562,7 +688,7 @@ plot_differences_violin(resistance_genes[1])
 
 Same comment.
 
-### Quantiles
+#### Quantiles
 
 Let's consider another option.
 
