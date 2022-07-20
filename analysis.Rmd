@@ -435,17 +435,18 @@ plot_gene_all_farms <- function(gene, infinity = -1000) {
   tmp2 <- bind_rows(tmp)
   plot_frame(tmp2[[2]], tmp2[[3]])
 
-  a <- tmp %>% 
+  tmp %>% 
     map(function(x) {x[[3]] <- replace(x[[3]], is.infinite(x[[3]]), infinity); x}) %>% 
     map(~ split(.x, .x$Group)) %>% 
     unlist(recursive = FALSE) %>% 
     map(mutate, col = c("blue", "red")[(Group == "Treatment") + 1]) %>% 
     sample() %>% 
-    walk(~ lines2(.x[[2]], .x[[3]], col = .x$col))
+#    walk(~ lines2(.x[[2]], .x[[3]], col = .x$col))
+    walk(~ plot_data(.x, gene, col = .x$col))
   
   mtext(gene)
-  abline(h = 0)
-  legend("topright", legend = c("treatment", "control"), col = c("red", "blue"),
+  abline(h = 0, lwd = 2)
+  legend("bottomright", legend = c("treatment", "control"), col = c("red", "blue"),
          lty = 1, lwd = 2, bty = "n")
 }
 ```
