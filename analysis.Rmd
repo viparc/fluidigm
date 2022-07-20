@@ -353,7 +353,7 @@ plot_gene_concentration(farms[1], resistance_genes[1], resistance_genes[1])
 Number of columns we want and some graph tuning:
 
 ```{r}
-ncols <- 3
+ncols <- 4
 plt_val <- c(.13, .92, .22, .9)
 ```
 
@@ -441,7 +441,6 @@ plot_gene_all_farms <- function(gene, infinity = -1000) {
     unlist(recursive = FALSE) %>% 
     map(mutate, col = c("blue", "red")[(Group == "Treatment") + 1]) %>% 
     sample() %>% 
-#    walk(~ lines2(.x[[2]], .x[[3]], col = .x$col))
     walk(~ plot_data(.x, gene, col = .x$col))
   
   mtext(gene)
