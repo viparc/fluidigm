@@ -481,11 +481,22 @@ plot_frame2 <- function(...) {
 }
 ```
 
+Let's also define a function that plot vertical and horizontal lines and adds
+title:
+
+```{r}
+lines_title <- function(x) {
+  mtext(x)
+  abline(h = 0, lwd = 2)
+  abline(v = 0, lwd = 2)
+}
+```
+
 Let's now explore various ways to plot the data.
 
 #### Experiments time series
 
-Now, we can start exploring various option of plotting the data, starting with
+Now, we can start exploring various options of plotting the data, starting with
 this function:
 
 ```{r}
@@ -507,12 +518,10 @@ plot_gene_all_farms <- function(gene, infinity = -1000) {
     map(~ split(.x, .x$Group)) %>% 
     unlist(recursive = FALSE) %>% 
     map(mutate, col = c("blue", "red")[(Group == "Treatment") + 1]) %>% 
-    sample() %>% # with want to shuffle the treatments for unbias visualization
+    sample() %>% # we want to shuffle the treatments for unbiased visualization
     walk(~ plot_data(.x, gene, col = .x$col))
   
-  mtext(gene)
-  abline(h = 0, lwd = 2)
-  abline(v = 0, lwd = 2)
+  lines_title(gene)
 }
 ```
 
@@ -564,8 +573,7 @@ plot_gene_all_farms_boxplot <- function(gene) {
     bind_rows() %>% 
     boxplot2(eps, col = "red")
   
-  mtext(gene)
-  legend("topright", legend = c("treatment", "control"), fill = c("red", "blue"), bty = "n")
+  lines_title(gene)
 }
 ```
 
@@ -573,6 +581,7 @@ Let's try it:
 
 ```{r}
 plot_gene_all_farms_boxplot(resistance_genes[1])
+legend("topright", legend = c("treatment", "control"), fill = c("red", "blue"), bty = "n")
 ```
 
 Mmmm... For some reason, interquartiles ranges look a bit weird on some of these
@@ -615,8 +624,7 @@ plot_gene_all_farms_violin <- function(gene) {
     bind_rows() %>% 
     vioplot2(eps, "red")
   
-  mtext(gene)
-  legend("topright", legend = c("treatment", "control"), fill = c("red", "blue"), bty = "n")
+  lines_title(gene)
 }
 ```
 
@@ -624,6 +632,7 @@ Let's try it too:
 
 ```{r}
 plot_gene_all_farms_violin(resistance_genes[1])
+legend("topright", legend = c("treatment", "control"), fill = c("red", "blue"), bty = "n")
 ```
 
 Not sure I like it either...
@@ -650,7 +659,7 @@ plot_gene_all_farms_pairwise <- function(gene) {
       arrows(SamplingDay3, Control, SamplingDay3, Treatment, 0, col = col_val[color])
     })
   
-  mtext(gene)
+  lines_title(gene)
 }
 ```
 
@@ -680,8 +689,7 @@ plot_differences <- function(gene) {
   
   walk(tmp, ~ with(.x, lines(SamplingDay2, difference, col = "green", lwd = 2)))
 
-  abline(h = 0)
-  mtext(gene)
+  lines_title(gene)
 }
 ```
 
@@ -712,8 +720,7 @@ plot_differences_boxplot <- function(gene) {
     select(2, 1, 3) %>% 
     boxplot2(0, col = "green")
 
-  abline(h = 0)
-  mtext(gene)
+  lines_title(gene)
 }
 ```
 
@@ -746,8 +753,7 @@ plot_differences_violin <- function(gene) {
     select(2, 1, 3) %>% 
     vioplot2(0, col = "green")
 
-  abline(h = 0)
-  mtext(gene)
+  lines_title(gene)
 }
 ```
 
@@ -792,8 +798,7 @@ plot_differences_quantiles <- function(gene) {
       lines(x_val, `75%`, lty = 3)
     })
   
-  abline(h = 0)
-  mtext(gene)
+  lines_title(gene)
 }
 ```
 
