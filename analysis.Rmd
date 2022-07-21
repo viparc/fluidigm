@@ -496,25 +496,37 @@ Let's now explore various ways to plot the data.
 
 #### Experiments time series
 
-Now, we can start exploring various options of plotting the data, starting with
-this function:
+Now, we can start exploring various options of plotting the data. Let's start by
+considering this transformation function:
+
+```{r}
+transformation <- function(x) {
+  mutate_at(x, 3, log10)
+}
+```
+
+This function replaces infinity values in the third column of data frame `x` by
+some specified value:
+
+```{r}
+replace_infinity <- function(x, infinity = -1000) {
+  mutate_at(x, 3, ~ replace(.x, is.infinite(.x), infinity))
+}
+```
+
+With the 4 functions above being defined, we can proceed and explore plotting:
 
 ```{r}
 plot_gene_all_farms <- function(gene, infinity = -1000) {
-  transformation <- function(x) {
-    x[, 3] <- log10(x[, 3])
-    x
-  }
-  
   tmp <- genes_standardized %>%
     map(extract, c("Group", "SamplingDay2", gene)) %>%
     map(transformation)
 
   tmp2 <- bind_rows(tmp)
   plot_frame2(tmp2[[2]], tmp2[[3]])
-
+  
   tmp %>% 
-    map(function(x) {x[[3]] <- replace(x[[3]], is.infinite(x[[3]]), infinity); x}) %>% 
+    map(replace_infinity, infinity) %>% 
     map(~ split(.x, .x$Group)) %>% 
     unlist(recursive = FALSE) %>% 
     map(mutate, col = c("blue", "red")[(Group == "Treatment") + 1]) %>% 
@@ -553,25 +565,30 @@ Here is the alternative visualization:
 ```{r}
 plot_gene_all_farms_boxplot <- function(gene) {
   eps <- 1.5
+  col_control <- "blue"
+  col_treatment <- "red"
   
   tmp <- genes_standardized %>% 
     map(filter, SamplingDay != "Before") %>% 
-    map(extract, c("Group", "SamplingDay2", gene))
+    map(extract, c("Group", "SamplingDay2", gene))# %>% 
+#    transformation()
 
   tmp2 <- bind_rows(tmp)
   plot_frame2(tmp2[[2]], tmp2[[3]])
 
-  control <- map(tmp, filter, Group == "Control")
-  walk(control, ~ points(jitter(.x[[2]] - 2), .x[[3]], col = "blue"))
-  control %>%
+  control <- tmp %>%
+    map(filter, Group == "Control") %>% 
     bind_rows() %>% 
-    boxplot2(-eps, col = "blue")
+    arrange(SamplingDay2) # for some reason we need this before calling boxplot()...
+  points(jitter(control[[2]] - eps), control[[3]], col = col_control)
+  boxplot2(control, -eps, col = col_control)
   
-  treatment <- map(tmp, filter, Group == "Treatment")
-  walk(treatment, ~ points(jitter(.x[[2]] + 2), .x[[3]], col = "red"))
-  treatment %>%
+  treatment <- tmp %>%
+    map(filter, Group == "Treatment") %>% 
     bind_rows() %>% 
-    boxplot2(eps, col = "red")
+    arrange(SamplingDay2) # for some reason we need this before calling boxplot()...
+  points(jitter(treatment[[2]] + eps), treatment[[3]], col = col_treatment)
+  boxplot2(treatment, eps, col = col_treatment)
   
   lines_title(gene)
 }
@@ -581,11 +598,9 @@ Let's try it:
 
 ```{r}
 plot_gene_all_farms_boxplot(resistance_genes[1])
-legend("topright", legend = c("treatment", "control"), fill = c("red", "blue"), bty = "n")
+legend("topright", legend = c("treatment", "control"),
+       fill = adjustcolor(c("red", "blue"), .5), bty = "n")
 ```
-
-Mmmm... For some reason, interquartiles ranges look a bit weird on some of these
-boxplots. Not sure how this is calculated but I don't really like it.
 
 #### Violin plots
 
