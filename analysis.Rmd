@@ -22,8 +22,8 @@ required_packages <- c("readxl",
                        "dplyr",
                        "stringr",
                        "tidyr",
-                       "magrittr",
-                       "AMR")
+                       "AMR",
+                       "magrittr")
 ```
 
 Installing those that are not already installed on the system:
@@ -34,13 +34,13 @@ for (package in required_packages) {
 }
 ```
 
-Loading the packages:
+Loading the required packages:
 
 ```{r message = FALSE}
 devnull <- lapply(required_packages, require, character.only = TRUE)
 ```
 
-## Loading the data
+## Loading and fixing the data
 
 ### Antimicrobial use
 
@@ -50,13 +50,29 @@ Date and type of antimicrobial use per farm:
 amu <- read_excel("AMU_KietStudy_Marc.xlsx")
 ```
 
+It is a data frame that looks like this:
+
+```{r}
+amu
+```
+
 ### Antimicrobial classes
 
-Antimicrobial class of each antimicrobial:
+Antimicrobial class of the antimicrobial(s) against which each of the resistance
+genes is active:
 
 ```{r}
 classes <- read_excel("FarmvsClass.xlsx")
 ```
+
+It's a data frame that looks like this:
+
+```{r}
+classes
+```
+
+Note that each resistance gene can be active against antimicrobials of more than
+one antimicrobial class.
 
 ### Resistance genes concentrations
 
@@ -77,18 +93,30 @@ genes <- farms %>%
   setNames(farms)
 ```
 
+In the excel file, the gene concentrations for a given farm (with control and
+treatment experiments) are in a different tab. This structure is mapped in the
+`genes` object that is a list of data frames, each of them containing the genes
+concentrations for a given farm. As an example the data for the first farm look
+like this:
+
+```{r}
+genes[[1]]
+```
+
+#### Checking and fixing the columns names consistency
+
 Let's check that the names of the columns are the same for all the farms:
 
 ```{r}
-tmp <- genes %>%
+genes %>%
   map_df(names) %>% 
-  apply(1, unique)
-
-tmp[map_int(tmp, length) > 1]
+  apply(1, unique) %>% 
+  .[map_int(., length) > 1]
 ```
 
 There is a problem with with the `FarmID` variable that is called `K09` is one
-farm. Let's fix this. The names of the variables seem OK in the first farm:
+of the farms. Let's fix this. As the names of the variables seem OK in the first
+farm:
 
 ```{r}
 (correct_names <- names(genes[[1]]))
@@ -100,20 +128,20 @@ Let's use them as variables names for all the farms:
 genes %<>% map(setNames, correct_names)
 ```
 
+#### Dealing with missing "Before" measurements
+
 Note also that not all farms have a "Before" measurement in the control group:
 
 ```{r}
-tmp <- genes %>%
+(tmp <- genes %>%
   map(~ .x %>% filter(SamplingDay == "Before") %>% select(Group)) %>% 
   .[map_int(., nrow) < 2] %>% 
-  unlist()
-
-tmp
+  unlist())
 ```
 
 For the farms where the "Before" measurement is missing in the control group,
 let's just use the "Before" measurement of the treatment group. For that, we
-need the following function where `x` is a dataframe for one farm:
+need the following function where `x` is a data frame for one farm:
 
 ```{r}
 control_before <- function(x) {
@@ -124,42 +152,49 @@ control_before <- function(x) {
 }
 ```
 
-Let's now we can use this function on all the farms that needed to be fixed:
+Let's now use this function on all the farms that needed to be fixed:
 
 ```{r}
+# the names of the farms that need to be fixed:
 farms_to_fix <- tmp %>% 
   names() %>% 
   str_remove(".Group")
 
+# the fixed data for these farms:
 fixed_farms <- genes %>% 
-  magrittr::extract(farms_to_fix) %>% 
+  extract(farms_to_fix) %>% 
   map(control_before)
 
+# updating the original data with the fixed data:
 genes[farms_to_fix] <- fixed_farms
 ```
 
-Names of resistance genes:
+## Preparing the data for analyses
+
+### Computing sums of resistance genes
+
+Here we compute aggregates of resistance genes, these aggregates being the sums
+of all the resistance genes but also the sum of all the resistance genes by
+class of antimicrobial against which they are effective. Indeed, we will perform
+the analyses in 3 different ways: per resistant gene, for all resistant genes
+altogether, and per class of antimicrobials against which the resistant genes
+are active.
+
+Let's start by retrieving the names of resistance genes:
 
 ```{r}
 (resistance_genes <- setdiff(names(genes[[1]]),
                              c("FarmID", "Group", "Sample_Name", "SamplingDay")))
 ```
 
-## Preparing the data
-
-### Computing sums of resistance genes
-
-Here we compute aggregates of resistance genes, these aggregates being the sum
-of all the resistance genes but also the sum of all the resistance genes by
-class of antimicrobial against which they are effective. The correspondence
-between resistance genes and antimicrobial resistance is in the `classes`
-data frame:
+As a reminder `classes` looks like this:
 
 ```{r}
 classes
 ```
 
-Let's add a category `All` that corresponds to all the resistance genes:
+Let's add a category `All` to the `Antimicrobial_Class` variable. This category
+will simply correspond to all the resistance genes:
 
 ```{r}
 classes %<>% 
@@ -167,38 +202,42 @@ classes %<>%
                        Antimicrobial_Class = "All"))
 ```
 
-The antimicrobial classes to which each resistance gene corresponds are now:
+The antimicrobial classes against which each resistance gene is active now looks
+like:
 
 ```{r}
 (classes_names <- unique(classes$Antimicrobial_Class))
 ```
 
-The following function calculates the sum of the genes concentration for a given
-class `am_class` for the data frame of a given farm `farm`:
+Note that `Other` and `All` categories are actually not antimicrobials classes
+per se. The following function calculates the sum of the genes concentration for
+a given class `am_class` for the data frame `gene_farm` of a given farm:
 
 ```{r}
-sum_by_class <- function(am_class, farm) {
+sum_by_class <- function(am_class, gene_farm) {
   classes %>%
     filter(Antimicrobial_Class == am_class) %>% 
     pull(EvaGreen_Name) %>% 
-    extract(farm, .) %>% 
+    extract(gene_farm, .) %>% 
     rowSums()
 }
 ```
 
 The following function uses the one above and adds as many variables as
-antimicrobial classes to the data frame of a given farm:
+antimicrobial classes (`r length(classes_names)`) to the data frame of a given
+farm:
 
 ```{r}
-add_sums_by_class <- function(farm) {
-  farm %>%
+add_sums_by_class <- function(gene_farm) {
+  gene_farm %>%
     map_dfc(classes_names, sum_by_class, .) %>% 
     setNames(classes_names) %>% 
-    bind_cols(farm, .)
+    bind_cols(gene_farm, .)
 }
 ```
 
-Let's add the sums of concentrations to all the farms:
+Let's use this function to add the sums of the genes concentrations to the data
+frames of all the farms:
 
 ```{r message  = FALSE}
 genes %<>% map(add_sums_by_class)
@@ -206,14 +245,21 @@ genes %<>% map(add_sums_by_class)
 
 ### Antimicrobial classes for AMU
 
-The classes of the antimicrobials used:
-
-To work out the classes of antimicrobials used we first need to define a hash
-table that allows to match classes names as found by the `AMR` package and the
-classes names recorded in our `amu` data:
+As a reminder the data on AMU looks like this:
 
 ```{r}
-#          AMR package:                  amu dataset:
+amu
+```
+
+In order to work with AMU by antimicrobial class, we need to generate the
+antimicrobial class of each of the antimicrobial of the `AAI` column. For that,
+we can use the `ab_group()` function of the `AMR` package, but, for consistency
+with the `classes` data frame, we need to generate a hash table that provide the
+correspondence between the spelling of the given by the `AMR::ab_group()`
+function and the spelling used in our `classes` data frame:
+
+```{r}
+#          AMR package:                  classes data frame:
 hash <- c("Aminoglycosides"           = "Aminoglycoside",
           "Amphenicols"               = "Phenicol",
           "Antifungals/antimycotics"  = "Antifungals/antimycotics",
@@ -230,40 +276,42 @@ hash <- c("Aminoglycosides"           = "Aminoglycoside",
 Let's generate the correspondence data frame:
 
 ```{r}
-amu_classes <- amu %>% 
+(amu_classes <- amu %>% 
   select(AAI) %>% 
   unique() %>% 
-  mutate(group = map_chr(AAI, ab_group),
-         class = hash[group])
+  mutate(AMR_package = map_chr(AAI, ab_group),
+         classes_df  = hash[AMR_package]))
 
-amu_classes
 ```
 
 Let's check for missing values:
 
 ```{r}
-amu_classes %>% 
-  filter(is.na(AAI) | is.na(group) | is.na(class))
+filter(amu_classes, if_any(.fns = is.na))
 ```
 
 Let's fix it manually:
 
 ```{r}
-amu_classes[amu_classes$AAI == "bromhexine", "class"] <- "Mucoactive agent"
+amu_classes[amu_classes$AAI == "bromhexine", "classes_df"] <- "Mucoactive agent"
 ```
 
 Finally, we can use `amu_classes` to make another hash table:
 
 ```{r}
-hash <- with(amu_classes, setNames(class, AAI))
+hash <- with(amu_classes, setNames(classes_df, AAI))
 ```
 
 And we can use this new hash table to add the antimicrobial class to the `amu`
-dataframe:
+data frame:
 
 ```{r}
 (amu %<>% mutate(class = hash[AAI]))
 ```
+
+Here, the categories used in the `class` variable of the `amu` data frame are
+consistent with the categories used in the `Antimicrobial_Class` of the
+`classes` data frame.
 
 ## Data visualization
 
@@ -278,7 +326,7 @@ genes %>%
   unique()
 ```
 
-Generating new time points:
+Generating new time points and ordering the data chronologically:
 
 ```{r}
 genes %<>% map(mutate,
@@ -287,12 +335,6 @@ genes %<>% map(mutate,
                                                 After  = "0",
                                                 End    = "120"))) %>% 
   map(arrange, Group, SamplingDay2) # making sure that data are arranged chronologically
-```
-
-Some customized `lines()` and `points()` function:
-
-```{r}
-lines2 <- function(...) lines(..., lwd = 2)
 ```
 
 A utility function for the function `plot_gene_concentration()` that follows
@@ -312,22 +354,31 @@ plot_data <- function(x, gene, col, lwd = 2, lty = 3) {
 }
 ```
 
-The following function plots a given gene concentration as a function of time
-for control and treatment:
+Another utility function for the function `plot_gene_concentration()` that
+follows after. This function plot the axes, their range and labels:
 
 ```{r}
-plot_gene_concentration <- function(farm, gene, text) {
-  farm_dataset <- genes[[farm]]
-  
-  plot(farm_dataset$SamplingDay2, farm_dataset[[gene]], type = "n",
-       xlim = c(-10, 120), xlab = "time after treatment (days)",
-       ylab = "gene concentration", axes = FALSE)
+plot_frame <- function(...) {
+  plot(type = "n", xlim = c(-10, 120), axes = FALSE, ...)
   ats <- c(-7, seq(0, 120, 20))
   lbs <- ats
   lbs[1] <- "before"
   lbs[length(lbs)] <- "end"
   axis(1, ats, lbs)
   axis(2)
+}
+```
+
+The following function uses the two previous functions to plots the gene
+concentrations as a function of time for a given resistance gene `gene` in a
+given farm `farm`. And this for both control and treatment experiments:
+
+```{r}
+plot_gene_concentration <- function(farm, gene, text) {
+  farm_dataset <- genes[[farm]]
+  
+  plot_frame(farm_dataset$SamplingDay2, farm_dataset[[gene]],
+             xlab = "time after treatment (days)", ylab = "gene concentration")
 
   farm_dataset %>%
     filter(Group == "Control") %>% 
@@ -338,14 +389,17 @@ plot_gene_concentration <- function(farm, gene, text) {
     plot_data(gene, "red")
 
   mtext(text)
-  abline(v = 0)
+  abline(v = 0, lwd = 2)
 }
 ```
 
-Plotting `aac3-liacde` for control and treatment in farm K06
+The `text` argument is a character string to use as the title of the plot.
+Plotting `aac3-liacde` for control and treatment experiments in farm K06:
 
 ```{r}
 plot_gene_concentration(farms[1], resistance_genes[1], resistance_genes[1])
+legend("right", legend = c("treatment", "control"), col = c("red", "blue"),
+       lty = 1, lwd = 2, bty = "n")
 ```
 
 #### Plotting all the genes for a given farm
@@ -377,10 +431,17 @@ par(opar)
 
 ### Gathering data per gene
 
+Here we want to plot on a single graph the data from all the farms (with control
+and treatment experiments), with one line per experiment time series. For that,
+we first need to standardize the genes concentration in order to ensure that
+dynamics are comparable across experiments and farms. The standardization is
+done by taking the `Before` measurement as a reference value.
+
 #### Standardizing the data
 
-Let's now try to standardize the gene concentrations by the gene concentration
-before treatment. This function standardizes one experiment:
+The following function allows to standardize the data for all the resistance
+genes from one given experiment (i.e. either control or treatment in one given
+farm):
 
 ```{r}
 standardize_by_before_ <- function(x) {
@@ -390,7 +451,10 @@ standardize_by_before_ <- function(x) {
 }
 ```
 
-This function standardizes the control and the treatment experiments of a farm:
+Here `x` is the subset of the data frame of genes concentrations of a given farm
+that correspond either to the control of the treatment experiment. This function
+below uses the one above and standardizes the data for all the resistance genes
+for both the control and treatment experiments of a given farm:
 
 ```{r}
 standardize_by_before <- function(x) {
@@ -401,20 +465,23 @@ standardize_by_before <- function(x) {
 }
 ```
 
-Let's standardize the gene concentrations for all the farms:
+Now here `x` is the data frame of genes concentrations of a given farm. Let's
+use this function to standardize the gene concentrations for all the farms:
 
 ```{r}
 genes_standardized <- map(genes, standardize_by_before)
 ```
 
-Let's now plot all the farms on a single plot for a given antimicrobial. Let's
-first define the following function that draw the layout the plot:
+Let's now plot the concentrations of a given gene across the farms on a single
+plot. Let's first define the following function that draws the layout the plot:
 
 ```{r}
-plot_frame <- function(...) {
-  plot(..., type = "n", xlab = "time (days)", ylab = "standardized genes concentrations")
+plot_frame2 <- function(...) {
+  plot_frame(..., xlab = "time (days)", ylab = "standardized genes concentrations")
 }
 ```
+
+Let's now explore various ways to plot the data.
 
 #### Experiments time series
 
@@ -433,27 +500,31 @@ plot_gene_all_farms <- function(gene, infinity = -1000) {
     map(transformation)
 
   tmp2 <- bind_rows(tmp)
-  plot_frame(tmp2[[2]], tmp2[[3]])
+  plot_frame2(tmp2[[2]], tmp2[[3]])
 
   tmp %>% 
     map(function(x) {x[[3]] <- replace(x[[3]], is.infinite(x[[3]]), infinity); x}) %>% 
     map(~ split(.x, .x$Group)) %>% 
     unlist(recursive = FALSE) %>% 
     map(mutate, col = c("blue", "red")[(Group == "Treatment") + 1]) %>% 
-    sample() %>% 
+    sample() %>% # with want to shuffle the treatments for unbias visualization
     walk(~ plot_data(.x, gene, col = .x$col))
   
   mtext(gene)
   abline(h = 0, lwd = 2)
-  legend("bottomright", legend = c("treatment", "control"), col = c("red", "blue"),
-         lty = 1, lwd = 2, bty = "n")
+  abline(v = 0, lwd = 2)
 }
 ```
 
-Let's try it on one antimicrobial:
+Note here that we transform the standardized genes concentrations. Depending on
+the chosen transformation, it may generate infinity values. For visualization
+purpose we replace these values by the big number `infinity` in the list of the
+function's arguments. Let's try it on one resistance gene:
 
 ```{r}
-plot_gene_all_farms(resistance_genes[1], -1000)
+plot_gene_all_farms(resistance_genes[1])
+legend("bottomright", legend = c("treatment", "control"), col = c("red", "blue"),
+       lty = 1, lwd = 2, bty = "n")
 ```
 
 #### Boxplots
@@ -471,15 +542,15 @@ boxplot2 <- function(x, eps, col, ...) {
 Here is the alternative visualization:
 
 ```{r}
-plot_gene_all_farms_boxplot <- function(antimicrobial) {
+plot_gene_all_farms_boxplot <- function(gene) {
   eps <- 1.5
   
   tmp <- genes_standardized %>% 
     map(filter, SamplingDay != "Before") %>% 
-    map(extract, c("Group", "SamplingDay2", antimicrobial))
+    map(extract, c("Group", "SamplingDay2", gene))
 
   tmp2 <- bind_rows(tmp)
-  plot_frame(tmp2[[2]], tmp2[[3]])
+  plot_frame2(tmp2[[2]], tmp2[[3]])
 
   control <- map(tmp, filter, Group == "Control")
   walk(control, ~ points(jitter(.x[[2]] - 2), .x[[3]], col = "blue"))
@@ -493,7 +564,7 @@ plot_gene_all_farms_boxplot <- function(antimicrobial) {
     bind_rows() %>% 
     boxplot2(eps, col = "red")
   
-  mtext(antimicrobial)
+  mtext(gene)
   legend("topright", legend = c("treatment", "control"), fill = c("red", "blue"), bty = "n")
 }
 ```
@@ -522,15 +593,15 @@ vioplot2 <- function(x, eps, color, ...) {
 And the new plotting function:
 
 ```{r}
-plot_gene_all_farms_violin <- function(antimicrobial) {
+plot_gene_all_farms_violin <- function(gene) {
   eps <- 1.5
   
   tmp <- genes_standardized %>% 
     map(filter, SamplingDay != "Before") %>% 
-    map(extract, c("Group", "SamplingDay2", antimicrobial))
+    map(extract, c("Group", "SamplingDay2", gene))
 
   tmp2 <- bind_rows(tmp)
-  plot_frame(tmp2[[2]], tmp2[[3]])
+  plot_frame2(tmp2[[2]], tmp2[[3]])
 
   control <- map(tmp, filter, Group == "Control")
   walk(control, ~ points(jitter(.x[[2]] - 2), .x[[3]], col = "blue"))
@@ -544,7 +615,7 @@ plot_gene_all_farms_violin <- function(antimicrobial) {
     bind_rows() %>% 
     vioplot2(eps, "red")
   
-  mtext(antimicrobial)
+  mtext(gene)
   legend("topright", legend = c("treatment", "control"), fill = c("red", "blue"), bty = "n")
 }
 ```
@@ -563,23 +634,23 @@ Let's plot paired treatment and control for each farm instead. For that, we need
 the following function:
 
 ```{r}
-plot_gene_all_farms_pairwise <- function(antimicrobial) {
+plot_gene_all_farms_pairwise <- function(gene) {
   col_val <- adjustcolor(c("blue", "red"), .5)
 
   genes %>% 
-    map(extract, c("SamplingDay2", "Group", antimicrobial)) %>% 
+    map(extract, c("SamplingDay2", "Group", gene)) %>% 
     map(pivot_wider, names_from = Group, values_from = 3) %>% 
     bind_rows() %>% 
     mutate(SamplingDay3 = jitter(SamplingDay2),
            color = (Treatment > Control) + 1) %>% 
     with({
-      plot_frame(rep(SamplingDay3, 2), c(Control, Treatment))
+      plot_frame2(rep(SamplingDay3, 2), c(Control, Treatment))
       points(SamplingDay3, Control, col = "blue")
       points(SamplingDay3, Treatment, col = "red")
       arrows(SamplingDay3, Control, SamplingDay3, Treatment, 0, col = col_val[color])
     })
   
-  mtext(antimicrobial)
+  mtext(gene)
 }
 ```
 
@@ -597,20 +668,20 @@ Let's plot the difference between treatment and control for each farm. For that,
 we need the following function:
 
 ```{r}
-plot_differences <- function(antimicrobial) {
+plot_differences <- function(gene) {
   tmp <- genes %>% 
-    map(extract, c("SamplingDay2", "Group", antimicrobial)) %>% 
+    map(extract, c("SamplingDay2", "Group", gene)) %>% 
     map(pivot_wider, names_from = Group, values_from = 3) %>% 
     map(mutate, difference = Treatment - Control)
 
   tmp %>% 
     bind_rows() %$% 
-    plot_frame(SamplingDay2, difference)
+    plot_frame2(SamplingDay2, difference)
   
-  walk(tmp, ~ with(.x, lines2(SamplingDay2, difference, col = "green")))
+  walk(tmp, ~ with(.x, lines(SamplingDay2, difference, col = "green", lwd = 2)))
 
   abline(h = 0)
-  mtext(antimicrobial)
+  mtext(gene)
 }
 ```
 
@@ -625,10 +696,10 @@ plot_differences(resistance_genes[1])
 Let's consider this function with boxplots:
 
 ```{r}
-plot_differences_boxplot <- function(antimicrobial) {
+plot_differences_boxplot <- function(gene) {
   
   tmp <- genes %>% 
-    map(extract, c("SamplingDay2", "Group", antimicrobial)) %>% 
+    map(extract, c("SamplingDay2", "Group", gene)) %>% 
     map(pivot_wider, names_from = Group, values_from = 3) %>% 
     map(mutate, difference = Treatment - Control) %>% 
     bind_rows()
@@ -642,7 +713,7 @@ plot_differences_boxplot <- function(antimicrobial) {
     boxplot2(0, col = "green")
 
   abline(h = 0)
-  mtext(antimicrobial)
+  mtext(gene)
 }
 ```
 
@@ -659,10 +730,10 @@ The boxplot still looks weird.
 Let's look at the violin alternative:
 
 ```{r}
-plot_differences_violin <- function(antimicrobial) {
+plot_differences_violin <- function(gene) {
   
   tmp <- genes %>% 
-    map(extract, c("SamplingDay2", "Group", antimicrobial)) %>% 
+    map(extract, c("SamplingDay2", "Group", gene)) %>% 
     map(pivot_wider, names_from = Group, values_from = 3) %>% 
     map(mutate, difference = Treatment - Control) %>% 
     bind_rows()
@@ -676,7 +747,7 @@ plot_differences_violin <- function(antimicrobial) {
     vioplot2(0, col = "green")
 
   abline(h = 0)
-  mtext(antimicrobial)
+  mtext(gene)
 }
 ```
 
@@ -693,9 +764,9 @@ Same comment.
 Let's consider another option.
 
 ```{r}
-plot_differences_quantiles <- function(antimicrobial) {
+plot_differences_quantiles <- function(gene) {
   tmp <- genes %>% 
-    map(extract, c("SamplingDay2", "Group", antimicrobial)) %>% 
+    map(extract, c("SamplingDay2", "Group", gene)) %>% 
     map(pivot_wider, names_from = Group, values_from = 3) %>% 
     map(mutate, difference = Treatment - Control) %>% 
     bind_rows()
@@ -722,7 +793,7 @@ plot_differences_quantiles <- function(antimicrobial) {
     })
   
   abline(h = 0)
-  mtext(antimicrobial)
+  mtext(gene)
 }
 ```
 
