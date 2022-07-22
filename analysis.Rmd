@@ -358,8 +358,8 @@ Another utility function for the function `plot_gene_concentration()` that
 follows after. This function plot the axes, their range and labels:
 
 ```{r}
-plot_frame <- function(...) {
-  plot(type = "n", xlim = c(-10, 120), axes = FALSE, ...)
+plot_frame <- function(..., type = "n") {
+  plot(type = type, xlim = c(-10, 120), axes = FALSE, ...)
   ats <- c(-7, seq(0, 120, 20))
   lbs <- ats
   lbs[1] <- "before"
@@ -369,12 +369,19 @@ plot_frame <- function(...) {
 }
 ```
 
+Let's now define colors that we will use throughout for the control and
+treatment experiments:
+
+```{r}
+exp_col <- c(treatment = "red", control = "blue")
+```
+
 The following function uses the two previous functions to plots the gene
 concentrations as a function of time for a given resistance gene `gene` in a
 given farm `farm`. And this for both control and treatment experiments:
 
 ```{r}
-plot_gene_concentration <- function(farm, gene, text) {
+plot_gene_concentration <- function(farm, gene, text, col = exp_col) {
   farm_dataset <- genes[[farm]]
   
   plot_frame(farm_dataset$SamplingDay2, farm_dataset[[gene]],
@@ -382,11 +389,11 @@ plot_gene_concentration <- function(farm, gene, text) {
 
   farm_dataset %>%
     filter(Group == "Control") %>% 
-    plot_data(gene, "blue")
+    plot_data(gene, col["control"])
   
   farm_dataset %>%
     filter(Group == "Treatment") %>% 
-    plot_data(gene, "red")
+    plot_data(gene, col["treatment"])
 
   mtext(text)
   abline(v = 0, lwd = 2)
@@ -398,8 +405,7 @@ Plotting `aac3-liacde` for control and treatment experiments in farm K06:
 
 ```{r}
 plot_gene_concentration(farms[1], resistance_genes[1], resistance_genes[1])
-legend("right", legend = c("treatment", "control"), col = c("red", "blue"),
-       lty = 1, lwd = 2, bty = "n")
+legend("right", legend = names(exp_col), col = exp_col, lty = 1, lwd = 2, bty = "n")
 ```
 
 #### Plotting all the genes for a given farm
@@ -481,13 +487,21 @@ plot_frame2 <- function(...) {
 }
 ```
 
+The same on with a log scale y-axis:
+
+```{r}
+plot_frame2log <- function(...) {
+  plot_frame(..., xlab = "time (days)", ylab = "log(standardized genes concentrations)")
+}
+```
+
 Let's also define a function that plot vertical and horizontal lines and adds
 title:
 
 ```{r}
-lines_title <- function(x) {
+lines_title <- function(x, h = 0) {
   mtext(x)
-  abline(h = 0, lwd = 2)
+  abline(h = h, lwd = 2)
   abline(v = 0, lwd = 2)
 }
 ```
@@ -517,23 +531,23 @@ replace_infinity <- function(x, infinity = -1000) {
 With the 4 functions above being defined, we can proceed and explore plotting:
 
 ```{r}
-plot_gene_all_farms <- function(gene, infinity = -1000) {
+plot_gene_all_farms <- function(gene, infinity = -1000, h = 0, pf = plot_frame2) {
   tmp <- genes_standardized %>%
     map(extract, c("Group", "SamplingDay2", gene)) %>%
     map(transformation)
 
   tmp2 <- bind_rows(tmp)
-  plot_frame2(tmp2[[2]], tmp2[[3]])
+  pf(tmp2[[2]], tmp2[[3]])
   
   tmp %>% 
     map(replace_infinity, infinity) %>% 
     map(~ split(.x, .x$Group)) %>% 
     unlist(recursive = FALSE) %>% 
-    map(mutate, col = c("blue", "red")[(Group == "Treatment") + 1]) %>% 
+    map(mutate, col = exp_col[(Group == "Control") + 1]) %>% 
     sample() %>% # we want to shuffle the treatments for unbiased visualization
     walk(~ plot_data(.x, gene, col = .x$col))
   
-  lines_title(gene)
+  lines_title(gene, h)
 }
 ```
 
@@ -543,9 +557,8 @@ purpose we replace these values by the big number `infinity` in the list of the
 function's arguments. Let's try it on one resistance gene:
 
 ```{r}
-plot_gene_all_farms(resistance_genes[1])
-legend("bottomright", legend = c("treatment", "control"), col = c("red", "blue"),
-       lty = 1, lwd = 2, bty = "n")
+plot_gene_all_farms(resistance_genes[1], pf = plot_frame2log)
+legend("bottomright", legend = names(exp_col), col = exp_col, lty = 1, lwd = 2, bty = "n")
 ```
 
 #### Boxplots
@@ -563,43 +576,44 @@ boxplot2 <- function(x, eps, col, ...) {
 Here is the alternative visualization:
 
 ```{r}
-plot_gene_all_farms_boxplot <- function(gene) {
-  eps <- 1.5
-  col_control <- "blue"
-  col_treatment <- "red"
-  
+plot_gene_all_farms <- function(gene, col = exp_col, eps = 1.5, h = 0,
+                                transform = I, plot_frame = plot_frame2, plot_fct = boxplot2) {
   tmp <- genes_standardized %>% 
-    map(filter, SamplingDay != "Before") %>% 
-    map(extract, c("Group", "SamplingDay2", gene))# %>% 
-#    transformation()
+    bind_rows() %>% 
+    filter(SamplingDay != "Before") %>% 
+    select(c("Group", "SamplingDay2", gene)) %>% 
+    transform()
 
-  tmp2 <- bind_rows(tmp)
-  plot_frame2(tmp2[[2]], tmp2[[3]])
+  plot_frame(tmp[[2]], tmp[[3]])
 
   control <- tmp %>%
-    map(filter, Group == "Control") %>% 
-    bind_rows() %>% 
-    arrange(SamplingDay2) # for some reason we need this before calling boxplot()...
-  points(jitter(control[[2]] - eps), control[[3]], col = col_control)
-  boxplot2(control, -eps, col = col_control)
+    filter(Group == "Control") %>% 
+    arrange(SamplingDay2) # because boxplot() and vioplot() are not used with the formula option
+  points(jitter(control[[2]] - eps), control[[3]], col = col["control"])
+  plot_fct(control, -eps, col = col["control"])
   
   treatment <- tmp %>%
-    map(filter, Group == "Treatment") %>% 
-    bind_rows() %>% 
-    arrange(SamplingDay2) # for some reason we need this before calling boxplot()...
-  points(jitter(treatment[[2]] + eps), treatment[[3]], col = col_treatment)
-  boxplot2(treatment, eps, col = col_treatment)
+    filter(Group == "Treatment") %>% 
+    arrange(SamplingDay2) # because boxplot() and vioplot() are not used with the formula option
+  points(jitter(treatment[[2]] + eps), treatment[[3]], col = col["treatment"])
+  plot_fct(treatment, eps, col = col["treatment"])
   
-  lines_title(gene)
+  lines_title(gene, h)
 }
 ```
 
 Let's try it:
 
 ```{r}
-plot_gene_all_farms_boxplot(resistance_genes[1])
-legend("topright", legend = c("treatment", "control"),
-       fill = adjustcolor(c("red", "blue"), .5), bty = "n")
+plot_gene_all_farms(resistance_genes[1], h = 1)
+legend("topright", legend = names(exp_col), fill = adjustcolor(exp_col, .5), bty = "n")
+```
+
+But a log scale might be more appropriate:
+
+```{r}
+plot_gene_all_farms(resistance_genes[1], transform = transformation, plot_frame = plot_frame2log)
+legend("bottomright", legend = names(exp_col), fill = adjustcolor(exp_col, .5), bty = "n")
 ```
 
 #### Violin plots
@@ -614,77 +628,21 @@ vioplot2 <- function(x, eps, color, ...) {
 }
 ```
 
-And the new plotting function:
+Let's try plotting the data with the violin plot:
 
 ```{r}
-plot_gene_all_farms_violin <- function(gene) {
-  eps <- 1.5
-  
-  tmp <- genes_standardized %>% 
-    map(filter, SamplingDay != "Before") %>% 
-    map(extract, c("Group", "SamplingDay2", gene))
-
-  tmp2 <- bind_rows(tmp)
-  plot_frame2(tmp2[[2]], tmp2[[3]])
-
-  control <- map(tmp, filter, Group == "Control")
-  walk(control, ~ points(jitter(.x[[2]] - 2), .x[[3]], col = "blue"))
-  control %>%
-    bind_rows() %>% 
-    vioplot2(-eps, "blue")
-  
-  treatment <- map(tmp, filter, Group == "Treatment")
-  walk(treatment, ~ points(jitter(.x[[2]] + 2), .x[[3]], col = "red"))
-  treatment %>%
-    bind_rows() %>% 
-    vioplot2(eps, "red")
-  
-  lines_title(gene)
-}
-```
-
-Let's try it too:
-
-```{r}
-plot_gene_all_farms_violin(resistance_genes[1])
-legend("topright", legend = c("treatment", "control"), fill = c("red", "blue"), bty = "n")
-```
-
-Not sure I like it either...
-
-#### Paired treatment and control
-
-Let's plot paired treatment and control for each farm instead. For that, we need
-the following function:
-
-```{r}
-plot_gene_all_farms_pairwise <- function(gene) {
-  col_val <- adjustcolor(c("blue", "red"), .5)
-
-  genes %>% 
-    map(extract, c("SamplingDay2", "Group", gene)) %>% 
-    map(pivot_wider, names_from = Group, values_from = 3) %>% 
-    bind_rows() %>% 
-    mutate(SamplingDay3 = jitter(SamplingDay2),
-           color = (Treatment > Control) + 1) %>% 
-    with({
-      plot_frame2(rep(SamplingDay3, 2), c(Control, Treatment))
-      points(SamplingDay3, Control, col = "blue")
-      points(SamplingDay3, Treatment, col = "red")
-      arrows(SamplingDay3, Control, SamplingDay3, Treatment, 0, col = col_val[color])
-    })
-  
-  lines_title(gene)
-}
-```
-
-Let's try it:
-
-```{r}
-plot_gene_all_farms_pairwise(resistance_genes[1])
+plot_gene_all_farms(resistance_genes[1], h = 1, plot_fct = vioplot2)
+legend("topright", legend = names(exp_col), fill = adjustcolor(exp_col, .5), bty = "n")
 ```
 
 ### Differences between treatment and control
+
+```{r}
+plot_frame3 <- function(...) {
+  plot_frame(..., xlab = "time (days)",
+             ylab = "difference in standardized genes concentrations")
+}
+```
 
 #### Experiment time series
 
@@ -700,9 +658,9 @@ plot_differences <- function(gene) {
 
   tmp %>% 
     bind_rows() %$% 
-    plot_frame2(SamplingDay2, difference)
+    plot_frame3(SamplingDay2, difference)
   
-  walk(tmp, ~ with(.x, lines(SamplingDay2, difference, col = "green", lwd = 2)))
+  walk(tmp, with, lines(SamplingDay2, difference, col = "green", lwd = 2))
 
   lines_title(gene)
 }
@@ -716,24 +674,22 @@ plot_differences(resistance_genes[1])
 
 #### Boxplots
 
-Let's consider this function with boxplots:
+Let's consider this function for box-plots and violin plots:
 
 ```{r}
-plot_differences_boxplot <- function(gene) {
+plot_differences <- function(gene, plot_fct = boxplot2) {
   
   tmp <- genes %>% 
     map(extract, c("SamplingDay2", "Group", gene)) %>% 
     map(pivot_wider, names_from = Group, values_from = 3) %>% 
     map(mutate, difference = Treatment - Control) %>% 
-    bind_rows()
+    bind_rows() %>% 
+    arrange(SamplingDay2) %>% # for boxplot() and vioplot()
+    select(Control, SamplingDay2, difference) # for boxplot2() and vioplot2()
 
-  with(tmp, plot(jitter(SamplingDay2), difference, col = "green",
-                 xlab = "time (days)",
-                 ylab = "difference in standardized genes concentrations"))
-  
-  tmp %>% 
-    select(2, 1, 3) %>% 
-    boxplot2(0, col = "green")
+  with(tmp, plot_frame3(jitter(SamplingDay2), difference, col = "green", type = "p"))
+    
+  plot_fct(tmp, 0, col = "green")
 
   lines_title(gene)
 }
@@ -742,75 +698,46 @@ plot_differences_boxplot <- function(gene) {
 Let's try it:
 
 ```{r}
-plot_differences_boxplot(resistance_genes[1])
+plot_differences(resistance_genes[1], boxplot2)
 ```
-
-The boxplot still looks weird.
 
 #### Violin plots
 
 Let's look at the violin alternative:
 
 ```{r}
-plot_differences_violin <- function(gene) {
-  
-  tmp <- genes %>% 
-    map(extract, c("SamplingDay2", "Group", gene)) %>% 
-    map(pivot_wider, names_from = Group, values_from = 3) %>% 
-    map(mutate, difference = Treatment - Control) %>% 
-    bind_rows()
-
-  with(tmp, plot(jitter(SamplingDay2), difference, col = "green",
-                 xlab = "time (days)",
-                 ylab = "difference in standardized genes concentrations"))
-  
-  tmp %>% 
-    select(2, 1, 3) %>% 
-    vioplot2(0, col = "green")
-
-  lines_title(gene)
-}
+plot_differences(resistance_genes[1], vioplot2)
 ```
-
-Let's try it:
-
-```{r}
-plot_differences_violin(resistance_genes[1])
-```
-
-Same comment.
 
 #### Quantiles
 
 Let's consider another option.
 
 ```{r}
-plot_differences_quantiles <- function(gene) {
+plot_differences_quantiles <- function(gene, col_lines = "steelblue3", col_area = "lightblue") {
   tmp <- genes %>% 
     map(extract, c("SamplingDay2", "Group", gene)) %>% 
     map(pivot_wider, names_from = Group, values_from = 3) %>% 
     map(mutate, difference = Treatment - Control) %>% 
-    bind_rows()
+    bind_rows() %>% 
+    select(SamplingDay2, difference)
 
-  with(tmp, plot(jitter(SamplingDay2), difference, col = "darkgrey",
-                 xlab = "time (days)",
-                 ylab = "difference in standardized genes concentrations"))
+  with(tmp, plot_frame3(jitter(SamplingDay2), difference, col = col_area, type = "p"))
 
   x_val <- sort(unique(tmp$SamplingDay2))
   
   tmp %>%
-    select(SamplingDay2, difference) %>% 
     group_by(SamplingDay2) %>% 
     group_split() %>% 
     map(~ quantile(.x$difference, c(.25, .5, .75), na.rm = TRUE)) %>% 
     bind_rows() %>% 
     mutate(x_val = x_val) %>% 
     with({
-      points(x_val, `50%`, lwd = 2)
-      arrows(x_val, `25%`, x_val, `75%`, .1, 90, 3, lwd = 2, col = "black")
-      lines(x_val, `25%`, lty = 3)
-      lines(x_val, `50%`, lty = 2)
-      lines(x_val, `75%`, lty = 3)
+      polygon(c(x_val, rev(x_val)), c(`25%`, rev(`75%`)),
+              col = adjustcolor(col_area, .2), border = col_lines, lty = 3)
+      points(x_val, `50%`, lwd = 2, col = col_lines)
+      arrows(x_val, `25%`, x_val, `75%`, .1, 90, 3, lwd = 2, col = col_lines)
+      lines(x_val, `50%`, lty = 2, col = col_lines)
     })
   
   lines_title(gene)
