@@ -651,9 +651,10 @@ plot_differences <- function(gene) {
 
   tmp %>% 
     bind_rows() %$% 
-    plot_frame2(SamplingDay2, difference)
+    plot_frame(SamplingDay2, difference, xlab = "time (days)",
+               ylab = "difference in standardized genes concentrations")
   
-  walk(tmp, ~ with(.x, lines(SamplingDay2, difference, col = "green", lwd = 2)))
+  walk(tmp, with, lines(SamplingDay2, difference, col = "green", lwd = 2))
 
   lines_title(gene)
 }
