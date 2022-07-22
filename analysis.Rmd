@@ -635,38 +635,6 @@ plot_gene_all_farms(resistance_genes[1], h = 1, plot_fct = vioplot2)
 legend("topright", legend = names(exp_col), fill = adjustcolor(exp_col, .5), bty = "n")
 ```
 
-#### Paired treatment and control
-
-Let's plot paired treatment and control for each farm instead. For that, we need
-the following function:
-
-```{r}
-plot_gene_all_farms_pairwise <- function(gene) {
-  col_val <- adjustcolor(c("blue", "red"), .5)
-
-  genes %>% 
-    map(extract, c("SamplingDay2", "Group", gene)) %>% 
-    map(pivot_wider, names_from = Group, values_from = 3) %>% 
-    bind_rows() %>% 
-    mutate(SamplingDay3 = jitter(SamplingDay2),
-           color = (Treatment > Control) + 1) %>% 
-    with({
-      plot_frame2(rep(SamplingDay3, 2), c(Control, Treatment))
-      points(SamplingDay3, Control, col = "blue")
-      points(SamplingDay3, Treatment, col = "red")
-      arrows(SamplingDay3, Control, SamplingDay3, Treatment, 0, col = col_val[color])
-    })
-  
-  lines_title(gene)
-}
-```
-
-Let's try it:
-
-```{r}
-plot_gene_all_farms_pairwise(resistance_genes[1])
-```
-
 ### Differences between treatment and control
 
 #### Experiment time series
