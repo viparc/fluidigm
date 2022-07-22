@@ -313,7 +313,7 @@ Here, the categories used in the `class` variable of the `amu` data frame are
 consistent with the categories used in the `Antimicrobial_Class` of the
 `classes` data frame.
 
-## Data visualization
+## Options of data visualization
 
 ### Plotting the raw data per farm and gene
 
@@ -750,3 +750,6 @@ Let's try it:
 plot_differences_quantiles(resistance_genes[1])
 ```
 
+## Analysis by age
+
+## Analysis by groups of antimicrobials
