@@ -315,6 +315,52 @@ consistent with the categories used in the `Antimicrobial_Class` of the
 
 ## Antimicrobials use
 
+```{r}
+duplicate_first <- function(x) {
+  bind_rows(x, x[1, ])
+}
+```
+
+```{r}
+remove_last <- function(x) {
+  x[-nrow(x), ]
+}
+```
+
+```{r}
+get_last <- function(x) {
+  unlist(x[nrow(x), "y"])
+}
+```
+
+```{r}
+a <- amu %>% 
+  mutate(end = AgeUse_Day + DurationOfUse_days) %>% 
+  group_by(FarmID) %>% 
+  group_split() %>% 
+  map(arrange, AgeUse_Day, end) %>% 
+  map(duplicate_first) %>% 
+  bind_rows() %>% 
+  mutate(y = row_number()) %>% 
+  group_by(FarmID) %>% 
+  group_split()
+
+b <- a %>% 
+  map_int(get_last)
+
+cc <- a %>% 
+  map(remove_last) %>% 
+  bind_rows()
+
+plot(NA, xlim = c(0, max(cc$end, na.rm = TRUE)), ylim = c(0, (max(cc$y) + 1)), type = "n", xlab = "age of flock (days)", ylab = "", axes = FALSE, xaxs = "i", yaxs = "i")
+box(bty = "o")
+axis(1)
+with(cc, segments(AgeUse_Day, y, end, y, col = "red"))
+abline(h = b, col = "grey")
+abline(v = 0)
+abline(v = seq(7, 100, 7), col = "grey")
+```
+
 ## Options of genes concentrations visualization
 
 ### Plotting the raw data per farm and gene
