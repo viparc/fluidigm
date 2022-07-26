@@ -334,7 +334,7 @@ get_last <- function(x) {
 ```
 
 ```{r}
-a <- amu %>% 
+tmp <- amu %>% 
   mutate(end = AgeUse_Day + DurationOfUse_days) %>% 
   group_by(FarmID) %>% 
   group_split() %>% 
@@ -345,20 +345,38 @@ a <- amu %>%
   group_by(FarmID) %>% 
   group_split()
 
-b <- a %>% 
+last_values <- tmp %>% 
   map_int(get_last)
 
-cc <- a %>% 
+tmp %<>% 
   map(remove_last) %>% 
   bind_rows()
 
-plot(NA, xlim = c(0, max(cc$end, na.rm = TRUE)), ylim = c(0, (max(cc$y) + 1)), type = "n", xlab = "age of flock (days)", ylab = "", axes = FALSE, xaxs = "i", yaxs = "i")
+classes_names <- tmp %>%
+  pull(class) %>%
+  unique()
+
+hash <- classes_names %>%
+  length() %>% 
+  RColorBrewer::brewer.pal("Set3") %>% 
+  setNames(classes_names)
+
+tmp %<>% mutate(color = hash[class])
+
+plot(NA, xlim = c(-7, max(tmp$end, na.rm = TRUE)), ylim = c(0, (max(tmp$y) + 1)),
+     type = "n", xlab = "age of flock (days)", ylab = "", axes = FALSE,
+     xaxs = "i", yaxs = "i")
 box(bty = "o")
 axis(1)
-with(cc, segments(AgeUse_Day, y, end, y, col = "red"))
-abline(h = b, col = "grey")
+with(tmp, segments(AgeUse_Day, y, end, y, col = color, lwd = 2))
+abline(h = last_values, col = "grey")
 abline(v = 0)
 abline(v = seq(7, 100, 7), col = "grey")
+
+tmp %>% 
+  group_by(FarmID) %>% 
+  summarise(y = mean(y)) %$%
+  text(-3.5, y, FarmID, cex = .5)
 ```
 
 ## Options of genes concentrations visualization
