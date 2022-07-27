@@ -23,6 +23,7 @@ required_packages <- c("readxl",
                        "stringr",
                        "tidyr",
                        "AMR",
+                       "RColorBrewer",
                        "magrittr")
 ```
 
@@ -315,11 +316,16 @@ consistent with the categories used in the `Antimicrobial_Class` of the
 
 ## Antimicrobials use
 
+This function duplicates the first row of a data frame and paste it at the end
+of the data frame:
+
 ```{r}
 duplicate_first <- function(x) {
   bind_rows(x, x[1, ])
 }
 ```
+
+This function remove the last row of a data frame:
 
 ```{r}
 remove_last <- function(x) {
@@ -327,11 +333,15 @@ remove_last <- function(x) {
 }
 ```
 
+This function get the last value of the "y" variable of a data frame:
+
 ```{r}
 get_last <- function(x) {
   unlist(x[nrow(x), "y"])
 }
 ```
+
+Preparing the data for plotting:
 
 ```{r}
 tmp <- amu %>% 
@@ -358,25 +368,37 @@ classes_names <- tmp %>%
 
 hash <- classes_names %>%
   length() %>% 
-  RColorBrewer::brewer.pal("Set3") %>% 
+  brewer.pal("Set3") %>% 
   setNames(classes_names)
 
 tmp %<>% mutate(color = hash[class])
+```
 
-plot(NA, xlim = c(-7, max(tmp$end, na.rm = TRUE)), ylim = c(0, (max(tmp$y) + 1)),
+Plotting the data:
+
+```{r fig.width = 8}
+lwd_val <- 2
+opar <- par(plt = c(.05, .7, .16347245, .86858097))
+
+plot(NA, xlim = c(-7, 120), ylim = c(0, (max(tmp$y) + 1)),
      type = "n", xlab = "age of flock (days)", ylab = "", axes = FALSE,
      xaxs = "i", yaxs = "i")
 box(bty = "o")
 axis(1)
-with(tmp, segments(AgeUse_Day, y, end, y, col = color, lwd = 2))
+with(tmp, segments(AgeUse_Day, y, end, y, col = color, lwd = lwd_val))
 abline(h = last_values, col = "grey")
 abline(v = 0)
-abline(v = seq(7, 100, 7), col = "grey")
+abline(v = seq(7, 120, 7), col = "grey")
 
 tmp %>% 
   group_by(FarmID) %>% 
   summarise(y = mean(y)) %$%
   text(-3.5, y, FarmID, cex = .5)
+
+par(plt = c(.71, 1, .16347245, .86858097), new = TRUE)
+plot(1:10, type = "n", axes = FALSE, ann = FALSE)
+legend("center", legend = names(hash), col = hash, lwd = lwd_val, lty = 1, bty = "n")
+par(opar)
 ```
 
 ## Options of genes concentrations visualization
