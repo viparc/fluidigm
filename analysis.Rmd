@@ -378,7 +378,8 @@ Plotting the data:
 
 ```{r fig.width = 8}
 lwd_val <- 2
-opar <- par(plt = c(.05, .7, .16347245, .86858097))
+y_val <- c(.16347245, .86858097)
+opar <- par(plt = c(.05, .7, y_val))
 
 plot(NA, xlim = c(-7, 120), ylim = c(0, (max(tmp$y) + 1)),
      type = "n", xlab = "age of flock (days)", ylab = "", axes = FALSE,
@@ -395,7 +396,7 @@ tmp %>%
   summarise(y = mean(y)) %$%
   text(-3.5, y, FarmID, cex = .5)
 
-par(plt = c(.71, 1, .16347245, .86858097), new = TRUE)
+par(plt = c(.71, 1, y_val), new = TRUE)
 plot(1:10, type = "n", axes = FALSE, ann = FALSE)
 legend("center", legend = names(hash), col = hash, lwd = lwd_val, lty = 1, bty = "n")
 par(opar)
