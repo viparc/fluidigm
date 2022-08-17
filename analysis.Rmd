@@ -342,6 +342,61 @@ get_last <- function(x) {
 }
 ```
 
+This function retrieves the sampling collection time from the data frame `x` of
+a farm
+
+```{r}
+sampling_dates <- function(x) {
+  x %>% 
+    pull(SamplingDay) %>%
+    unique() %>% 
+    setdiff(c("Before", "After", "End")) %>% 
+    c(0) %>% 
+    as.integer() %>% 
+    sort()
+}
+```
+
+This function adds the sampling collection time points to the figure of AMU,
+using the data `data` that have been prepared for this figure:
+
+```{r}
+adding_sample_collection <- function(data) {
+  f <- function(x) {
+    if(nrow(x) > 1) {
+      y <- x %>% 
+        filter(c(AgeUse_Day[-1] > end[-length(end)], NA)) %>% 
+        pull(end) %>% 
+        first()
+      if(is.na(y)) return(max(x$end))
+      return(y)
+    }
+    pull(x, end)
+  }
+  
+  g <- function(y) {
+    data.frame(FarmID = rep(names(y), map(y, length)), x = unlist(y))
+  }
+
+  a <- map(genes, sampling_dates)
+  
+  b <- data %>% 
+  group_by(FarmID) %>% 
+  summarise(y1 = min(y) - 1,
+            y2 = max(y) + 1)
+  
+  data %>% 
+    group_by(FarmID) %>% 
+    group_split() %>% 
+    map(f) %>% 
+    unlist() %>% 
+    map2(a, ., `+`) %>% 
+    g() %>% 
+    left_join(b, "FarmID") %$%
+    segments(x, y1, x, y2)
+}
+```
+
 Preparing the data for plotting antimicrobial use:
 
 ```{r}
@@ -379,11 +434,12 @@ tmp %<>% mutate(color = hash[class])
 Plotting the data:
 
 ```{r fig.width = 8}
+x_max <- 135
 lwd_val <- 2
 y_val <- c(.16347245, .86858097)
 opar <- par(plt = c(.05, .7, y_val))
 
-plot(NA, xlim = c(-7, 120), ylim = c(0, (max(tmp$y) + 1)),
+plot(NA, xlim = c(-7, x_max), ylim = c(0, (max(tmp$y) + 1)),
      type = "n", xlab = "age of flock (days)", ylab = "", axes = FALSE,
      xaxs = "i", yaxs = "i")
 box(bty = "o")
@@ -391,18 +447,22 @@ axis(1)
 with(tmp, segments(AgeUse_Day, y, end, y, col = color, lwd = lwd_val))
 abline(h = last_values, col = "grey")
 abline(v = 0)
-abline(v = seq(7, 120, 7), col = "grey")
+abline(v = seq(7, x_max, 7), col = "grey")
 
 tmp %>% 
   group_by(FarmID) %>% 
   summarise(y = mean(y)) %$%
   text(-3.5, y, FarmID, cex = .5)
 
+adding_sample_collection(tmp)
+
 par(plt = c(.71, 1, y_val), new = TRUE)
 plot(1:10, type = "n", axes = FALSE, ann = FALSE)
 legend("center", legend = names(hash), col = hash, lwd = lwd_val, lty = 1, bty = "n")
 par(opar)
 ```
+
+Note that there is missing information for farm K24 here.
 
 ## Options of genes concentrations visualization
 
