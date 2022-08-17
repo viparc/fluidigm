@@ -153,7 +153,7 @@ control_before <- function(x) {
 }
 ```
 
-Let's now use this function on all the farms that needed to be fixed:
+Let's now use this function on all the farms that need to be fixed:
 
 ```{r}
 # the names of the farms that need to be fixed:
@@ -188,7 +188,7 @@ Let's start by retrieving the names of resistance genes:
                              c("FarmID", "Group", "Sample_Name", "SamplingDay")))
 ```
 
-As a reminder `classes` looks like this:
+As a reminder, `classes` looks like this:
 
 ```{r}
 classes
@@ -246,7 +246,7 @@ genes %<>% map(add_sums_by_class)
 
 ### Antimicrobial classes for AMU
 
-As a reminder the data on AMU looks like this:
+As a reminder, the data on AMU look like this:
 
 ```{r}
 amu
@@ -256,8 +256,9 @@ In order to work with AMU by antimicrobial class, we need to generate the
 antimicrobial class of each of the antimicrobial of the `AAI` column. For that,
 we can use the `ab_group()` function of the `AMR` package, but, for consistency
 with the `classes` data frame, we need to generate a hash table that provide the
-correspondence between the spelling of the given by the `AMR::ab_group()`
-function and the spelling used in our `classes` data frame:
+correspondence between the spelling of the antimicrobial class given by the
+`AMR::ab_group()` function and the spelling of the antimicrobial class used in
+our `classes` data frame:
 
 ```{r}
 #          AMR package:                  classes data frame:
@@ -285,7 +286,7 @@ Let's generate the correspondence data frame:
 
 ```
 
-Let's check for missing values:
+Let's check for missing values (given the warning we got in the above call):
 
 ```{r}
 filter(amu_classes, if_any(.fns = is.na))
@@ -316,8 +317,8 @@ consistent with the categories used in the `Antimicrobial_Class` of the
 
 ## Antimicrobials use
 
-This function duplicates the first row of a data frame and paste it at the end
-of the data frame:
+Let first define a few utility functions. This function duplicates the first row
+of a data frame `x` and paste it at the end of the data frame:
 
 ```{r}
 duplicate_first <- function(x) {
@@ -325,7 +326,7 @@ duplicate_first <- function(x) {
 }
 ```
 
-This function remove the last row of a data frame:
+This function removes the last row of a data frame `x`:
 
 ```{r}
 remove_last <- function(x) {
@@ -333,7 +334,7 @@ remove_last <- function(x) {
 }
 ```
 
-This function get the last value of the "y" variable of a data frame:
+This function gets the last value of the `y` variable of a data frame `x`:
 
 ```{r}
 get_last <- function(x) {
@@ -341,10 +342,11 @@ get_last <- function(x) {
 }
 ```
 
-Preparing the data for plotting:
+Preparing the data for plotting antimicrobial use:
 
 ```{r}
 tmp <- amu %>% 
+  filter(!class %in% c("Other", "Mucoactive agent", "Antifungals/antimycotics")) %>% 
   mutate(end = AgeUse_Day + DurationOfUse_days) %>% 
   group_by(FarmID) %>% 
   group_split() %>% 
