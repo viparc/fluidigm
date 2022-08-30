@@ -862,6 +862,22 @@ plot_differences(resistance_genes[1], vioplot2)
 
 #### Quantiles
 
+A tuning of the `polygon()` function:
+
+```{r}
+polygon2 <- function(x, y1, y2, ...) {
+  polygon(c(x, rev(x)), c(y1, rev(y2)), ...)
+}
+```
+
+A tuning of the `arrows()` function:
+
+```{r}
+arrows2 <- function(...) {
+  arrows(length = .1, angle = 90, code = 3, ...)
+}
+```
+
 Let's consider another option.
 
 ```{r}
@@ -885,10 +901,10 @@ plot_differences_quantiles <- function(gene, data = genes,
     bind_rows() %>% 
     mutate(x_val = x_val) %>% 
     with({
-      polygon(c(x_val, rev(x_val)), c(`25%`, rev(`75%`)),
-              col = adjustcolor(col_area, .2), border = col_lines, lty = 3)
+      polygon2(x_val, `25%`, `75%`,
+               col = adjustcolor(col_area, .2), border = col_lines, lty = 3)
       points(x_val, `50%`, lwd = 2, col = col_lines)
-      arrows(x_val, `25%`, x_val, `75%`, .1, 90, 3, lwd = 2, col = col_lines)
+      arrows2(x_val, `25%`, x_val, `75%`, lwd = 2, col = col_lines)
       lines(x_val, `50%`, lty = 2, col = col_lines)
     })
   
@@ -950,22 +966,6 @@ gene_conc_diff_quant <- function(x) {
     t() %>% 
     as.data.frame() %>% 
     mutate(SamplingDay2 = tmp)
-}
-```
-
-A tuning of the `polygon()` function:
-
-```{r}
-polygon2 <- function(x, y1, y2, ...) {
-  polygon(c(x, rev(x)), c(y1, rev(y2)), ...)
-}
-```
-
-A tuning of the `arrows()` function:
-
-```{r}
-arrows2 <- function(...) {
-  arrows(length = .1, angle = 90, code = 3, ...)
 }
 ```
 
