@@ -462,7 +462,7 @@ legend("center", legend = names(hash), col = hash, lwd = lwd_val, lty = 1, bty =
 par(opar)
 ```
 
-Note that there is missing information for farm K24 here.
+Note that there is missing information for farm K24 here. 
 
 ## Options of genes concentrations visualization
 
@@ -865,8 +865,9 @@ plot_differences(resistance_genes[1], vioplot2)
 Let's consider another option.
 
 ```{r}
-plot_differences_quantiles <- function(gene, col_lines = "steelblue3", col_area = "lightblue") {
-  tmp <- genes %>% 
+plot_differences_quantiles <- function(gene, data = genes,
+                                       col_lines = "steelblue3", col_area = "lightblue") {
+  tmp <- data %>% 
     map(extract, c("SamplingDay2", "Group", gene)) %>% 
     map(pivot_wider, names_from = Group, values_from = 3) %>% 
     map(mutate, difference = Treatment - Control) %>% 
@@ -904,3 +905,467 @@ plot_differences_quantiles(resistance_genes[1])
 ## Visualization by age
 
 ## Visualization by groups of antimicrobials
+
+* farm K06: Sulfonamide (+ MLSB)
+* farm K07: 
+* farm K08: Tetracycline + MLSB
+
+farm K08: Tetracycline + MLSB: here we want
+
+* a line for Tetracycline
+* a line for MLSB
+* a line for all the other ones
+
+The following function calculates the gene concentrations differences between
+Treatment and Control, for each genes of an experiment and at each time point.
+`x` is the data of this experiment.
+
+```{r}
+gene_conc_diff <- function(x) {
+  x %<>%
+    group_by(Group) %>% 
+    group_split()
+  
+  tmp <- x[[1]][[1]]
+
+  x %>%
+    map(select, -Group) %>% 
+    rev() %>% 
+    do.call(`-`, .) %>% 
+    mutate(SamplingDay2 = tmp)
+}
+```
+
+The following function calculates the quantiles of genes concentration,
+across genes at for each time point. The data frame `x` has time values in the
+column `SamplingDay2` and then genes concentrations by column.
+
+```{r}
+gene_conc_diff_quant <- function(x) {
+  tmp <- x$SamplingDay2
+
+  x %>% 
+    select(-SamplingDay2) %>% 
+    apply(1, quantile, c(.25, .5, .75)) %>% 
+    t() %>% 
+    as.data.frame() %>% 
+    mutate(SamplingDay2 = tmp)
+}
+```
+
+A tuning of the `polygon()` function:
+
+```{r}
+polygon2 <- function(x, y1, y2, ...) {
+  polygon(c(x, rev(x)), c(y1, rev(y2)), ...)
+}
+```
+
+A tuning of the `arrows()` function:
+
+```{r}
+arrows2 <- function(...) {
+  arrows(length = .1, angle = 90, code = 3, ...)
+}
+```
+
+The following function plots the data of some genes concentrations of an
+experiment:
+
+```{r}
+plot_data <- function(x, col_lines = "steelblue3", col_area = "lightblue",
+                      lwd_val = 2, add = FALSE, ...) {
+  if (add) {
+    plot_fct <- function(x, y, ...) {
+      points(jitter(x), y, col = col_area, ...)
+    }
+  } else {
+    plot_fct <- function(x, y, ...) {
+      plot_frame3(jitter(x), y, col = col_area, type = "p", ...)
+    }
+  }
+  
+  x %>% 
+    pivot_longer(-SamplingDay2) %$% 
+    plot_fct(SamplingDay2, value, ...)
+
+  x %>% 
+    gene_conc_diff_quant() %>% 
+    with({
+      polygon2(SamplingDay2, `25%`, `75%`, col = adjustcolor(col_area, .2),
+               border = col_lines, lty = 3)
+      points(SamplingDay2, `50%`, lwd = lwd_val, col = col_lines)
+      arrows2(SamplingDay2, `25%`, SamplingDay2, `75%`, lwd = lwd_val, col = col_lines)
+      lines(SamplingDay2, `50%`, lty = lwd_val, col = col_lines)
+    })
+}
+```
+
+The following function plot the data of a set `ab` of resistance genes in farm
+`farm`:
+
+```{r}
+plot_ab_set <- function(farm, ab, ...) {
+  genes_set <- classes %>% 
+    filter(Antimicrobial_Class %in% ab) %>% 
+    pull(EvaGreen_Name)
+
+  genes %>% 
+    extract2(farm) %>% 
+    extract(c("SamplingDay2", "Group", genes_set)) %>% 
+    gene_conc_diff() %>% 
+    plot_data(., ...)
+}
+```
+
+Let's generate the vector that contains the names of the antimicrobial classes
+used in the experiments:
+
+```{r}
+ab_classes <- classes %>% 
+  extract2("Antimicrobial_Class") %>% 
+  unique() %>% 
+  setdiff(c("Multidrug", "Other", "All"))
+```
+
+The following function calculates the y-axis range we should choose for a given
+farm:
+
+```{r}
+y_range <- function(farm) {
+  genes_set <- classes %>% 
+    filter(Antimicrobial_Class %in% ab_classes) %>% 
+    pull(EvaGreen_Name)
+
+  genes %>% 
+    extract2(farm) %>% 
+    extract(c("SamplingDay2", "Group", genes_set)) %>% 
+    gene_conc_diff() %>% 
+    select(-SamplingDay2) %>% 
+    range()
+}
+```
+
+### Plotting farm K08
+
+Parameters:
+
+```{r}
+lwd_v <- 2
+farm <- "K08"
+ab1 <- "Tetracycline"
+ab2 <- "MLSB"
+```
+
+Separated:
+
+```{r}
+plot_ab_set(farm, ab1,
+   col_lines = "steelblue3", col_area = "lightblue", lwd_val = lwd_v, ylim = y_range(farm))
+
+plot_ab_set(farm, ab2,
+   col_lines = "indianred1", col_area = "darksalmon", lwd_val = lwd_v, add = TRUE)
+
+plot_ab_set(farm, setdiff(ab_classes, c(ab1, ab2)),
+   col_lines = "grey", col_area = "grey", lwd_val = lwd_v, add = TRUE)
+
+abline(h = 0)
+
+legend("bottomright", legend = c(ab1, ab2, "others"),
+       fill = c("steelblue3" , "indianred1", "grey"), bty = "n")
+```
+
+Combined:
+
+```{r}
+plot_ab_set(farm, c(ab1, ab2),
+   col_lines = "steelblue3", col_area = "lightblue", lwd_val = lwd_v, ylim = y_range(farm))
+
+plot_ab_set(farm, setdiff(ab_classes, c(ab1, ab2)),
+   col_lines = "grey", col_area = "grey", lwd_val = lwd_v, add = TRUE)
+
+abline(h = 0)
+
+legend("bottomright", legend = c(paste(ab1, ab2, sep = " and "), "others"),
+       fill = c("steelblue3" , "grey"), bty = "n")
+```
+
+### Plotting farm K09
+
+Parameters:
+
+```{r}
+lwd_v <- 2
+farm <- "K09"
+ab1 <- "Tetracycline"
+ab2 <- "Polymyxin"
+```
+
+Separated:
+
+```{r}
+plot_ab_set(farm, ab1,
+   col_lines = "steelblue3", col_area = "lightblue", lwd_val = lwd_v, ylim = y_range(farm))
+
+plot_ab_set(farm, ab2,
+   col_lines = "indianred1", col_area = "darksalmon", lwd_val = lwd_v, add = TRUE)
+
+plot_ab_set(farm, setdiff(ab_classes, c(ab1, ab2)),
+   col_lines = "grey", col_area = "grey", lwd_val = lwd_v, add = TRUE)
+
+abline(h = 0)
+
+legend("bottomright", legend = c(ab1, ab2, "others"),
+       fill = c("steelblue3" , "indianred1", "grey"), bty = "n")
+```
+
+Combined:
+
+```{r}
+plot_ab_set(farm, c(ab1, ab2),
+   col_lines = "steelblue3", col_area = "lightblue", lwd_val = lwd_v, ylim = y_range(farm))
+
+plot_ab_set(farm, setdiff(ab_classes, c(ab1, ab2)),
+   col_lines = "grey", col_area = "grey", lwd_val = lwd_v, add = TRUE)
+
+abline(h = 0)
+
+legend("bottomright", legend = c(paste(ab1, ab2, sep = " and "), "others"),
+       fill = c("steelblue3" , "grey"), bty = "n")
+```
+
+### Plotting farm K11
+
+Parameters:
+
+```{r}
+lwd_v <- 2
+farm <- "K11"
+ab1 <- "Beta-Lactam"
+ab2 <- "Aminoglycoside"
+```
+
+Separated:
+
+```{r}
+plot_ab_set(farm, ab1,
+   col_lines = "steelblue3", col_area = "lightblue", lwd_val = lwd_v, ylim = y_range(farm))
+
+plot_ab_set(farm, ab2,
+   col_lines = "indianred1", col_area = "darksalmon", lwd_val = lwd_v, add = TRUE)
+
+plot_ab_set(farm, setdiff(ab_classes, c(ab1, ab2)),
+   col_lines = "grey", col_area = "grey", lwd_val = lwd_v, add = TRUE)
+
+abline(h = 0)
+
+legend("top", legend = c(ab1, ab2, "others"),
+       fill = c("steelblue3" , "indianred1", "grey"), bty = "n")
+```
+
+Combined:
+
+```{r}
+plot_ab_set(farm, c(ab1, ab2),
+   col_lines = "steelblue3", col_area = "lightblue", lwd_val = lwd_v, ylim = y_range(farm))
+
+plot_ab_set(farm, setdiff(ab_classes, c(ab1, ab2)),
+   col_lines = "grey", col_area = "grey", lwd_val = lwd_v, add = TRUE)
+
+abline(h = 0)
+
+legend("top", legend = c(paste(ab1, ab2, sep = " and "), "others"),
+       fill = c("steelblue3" , "grey"), bty = "n")
+```
+
+### Plotting farm K12
+
+Parameters:
+
+```{r}
+lwd_v <- 2
+farm <- "K12"
+ab1 <- "Beta-Lactam"
+ab2 <- "Aminoglycoside"
+```
+
+Separated:
+
+```{r}
+plot_ab_set(farm, ab1,
+   col_lines = "steelblue3", col_area = "lightblue", lwd_val = lwd_v, ylim = y_range(farm))
+
+plot_ab_set(farm, ab2,
+   col_lines = "indianred1", col_area = "darksalmon", lwd_val = lwd_v, add = TRUE)
+
+plot_ab_set(farm, setdiff(ab_classes, c(ab1, ab2)),
+   col_lines = "grey", col_area = "grey", lwd_val = lwd_v, add = TRUE)
+
+abline(h = 0)
+
+legend("bottomright", legend = c(ab1, ab2, "others"),
+       fill = c("steelblue3" , "indianred1", "grey"), bty = "n")
+```
+
+Combined:
+
+```{r}
+plot_ab_set(farm, c(ab1, ab2),
+   col_lines = "steelblue3", col_area = "lightblue", lwd_val = lwd_v, ylim = y_range(farm))
+
+plot_ab_set(farm, setdiff(ab_classes, c(ab1, ab2)),
+   col_lines = "grey", col_area = "grey", lwd_val = lwd_v, add = TRUE)
+
+abline(h = 0)
+
+legend("bottomright", legend = c(paste(ab1, ab2, sep = " and "), "others"),
+       fill = c("steelblue3" , "grey"), bty = "n")
+```
+
+### Plotting farm K13
+
+Parameters:
+
+```{r}
+lwd_v <- 2
+farm <- "K13"
+ab1 <- "Beta-Lactam"
+ab2 <- "Polymyxin"
+ab3 <- "MLSB"
+ab4 <- "Tetracycline"
+```
+
+Combined:
+
+```{r}
+plot_ab_set(farm, c(ab1, ab2, ab3, ab4),
+   col_lines = "steelblue3", col_area = "lightblue", lwd_val = lwd_v, ylim = y_range(farm))
+
+plot_ab_set(farm, setdiff(ab_classes, c(ab1, ab2, ab3, ab4)),
+   col_lines = "grey", col_area = "grey", lwd_val = lwd_v, add = TRUE)
+
+abline(h = 0)
+
+legend("bottomright",
+       legend = c(paste(paste(ab1, ab2, ab3, sep = ", "), ab2, sep = " and "), "others"),
+       fill = c("steelblue3" , "grey"), bty = "n")
+```
+
+### Plotting farm K19
+
+Parameters:
+
+```{r}
+lwd_v <- 2
+farm <- "K19"
+ab1 <- "Quinolone"
+```
+
+Separated:
+
+```{r}
+plot_ab_set(farm, ab1,
+   col_lines = "steelblue3", col_area = "lightblue", lwd_val = lwd_v, ylim = y_range(farm))
+
+plot_ab_set(farm, setdiff(ab_classes, ab1),
+   col_lines = "grey", col_area = "grey", lwd_val = lwd_v, add = TRUE)
+
+abline(h = 0)
+
+legend("bottomright", legend = c(ab1, "others"),
+       fill = c("steelblue3" , "grey"), bty = "n")
+```
+
+### Plotting farm K22
+
+Parameters:
+
+```{r}
+lwd_v <- 2
+farm <- "K22"
+ab1 <- "Tetracycline"
+ab2 <- "Polymyxin"
+```
+
+Separated:
+
+```{r}
+plot_ab_set(farm, ab1,
+   col_lines = "steelblue3", col_area = "lightblue", lwd_val = lwd_v, ylim = y_range(farm))
+
+plot_ab_set(farm, ab2,
+   col_lines = "indianred1", col_area = "darksalmon", lwd_val = lwd_v, add = TRUE)
+
+plot_ab_set(farm, setdiff(ab_classes, c(ab1, ab2)),
+   col_lines = "grey", col_area = "grey", lwd_val = lwd_v, add = TRUE)
+
+abline(h = 0)
+
+legend("topright", legend = c(ab1, ab2, "others"),
+       fill = c("steelblue3" , "indianred1", "grey"), bty = "n")
+```
+
+Combined:
+
+```{r}
+plot_ab_set(farm, c(ab1, ab2),
+   col_lines = "steelblue3", col_area = "lightblue", lwd_val = lwd_v, ylim = y_range(farm))
+
+plot_ab_set(farm, setdiff(ab_classes, c(ab1, ab2)),
+   col_lines = "grey", col_area = "grey", lwd_val = lwd_v, add = TRUE)
+
+abline(h = 0)
+
+legend("topright", legend = c(paste(ab1, ab2, sep = " and "), "others"),
+       fill = c("steelblue3" , "grey"), bty = "n")
+```
+
+### Plotting farm K25
+
+Parameters:
+
+```{r}
+lwd_v <- 2
+farm <- "K25"
+ab1 <- "Quinolone"
+```
+
+Separated:
+
+```{r}
+plot_ab_set(farm, ab1,
+   col_lines = "steelblue3", col_area = "lightblue", lwd_val = lwd_v, ylim = y_range(farm))
+
+plot_ab_set(farm, setdiff(ab_classes, ab1),
+   col_lines = "grey", col_area = "grey", lwd_val = lwd_v, add = TRUE)
+
+abline(h = 0)
+
+legend("bottomright", legend = c(ab1, "others"),
+       fill = c("steelblue3" , "grey"), bty = "n")
+```
+
+### Plotting farm K26
+
+Parameters:
+
+```{r}
+lwd_v <- 2
+farm <- "K26"
+ab1 <- "Tetracycline"
+```
+
+Separated:
+
+```{r}
+plot_ab_set(farm, ab1,
+   col_lines = "steelblue3", col_area = "lightblue", lwd_val = lwd_v, ylim = y_range(farm))
+
+plot_ab_set(farm, setdiff(ab_classes, ab1),
+   col_lines = "grey", col_area = "grey", lwd_val = lwd_v, add = TRUE)
+
+abline(h = 0)
+
+legend("bottomright", legend = c(ab1, "others"),
+       fill = c("steelblue3" , "grey"), bty = "n")
+```
