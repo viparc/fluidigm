@@ -918,6 +918,14 @@ Let's try it:
 plot_differences_quantiles(resistance_genes[1])
 ```
 
+Let's plot all the genes:
+
+```{r fig.height = ceiling(length(resistance_genes) / ncols) * (1 + 2 / 3), fig.width = 2.45 * ncols, warning = FALSE}
+opar <- par(mfrow = c(ceiling(length(resistance_genes) / ncols), ncols), plt = plt_val)
+walk(resistance_genes, plot_differences_quantiles)
+par(opar)
+```
+
 ## Visualization by age
 
 ## Visualization by groups of antimicrobials
@@ -1368,4 +1376,298 @@ abline(h = 0)
 
 legend("bottomright", legend = c(ab1, "others"),
        fill = c("steelblue3" , "grey"), bty = "n")
+```
+
+## Distances between genes
+
+### Calculating distances using differences
+
+The following function calculates the difference between treatment and control
+for a given gene `gene` for all the farms:
+
+```{r}
+calc_differences <- function(gene) {
+  genes %>% 
+    map(extract, c("SamplingDay2", "Group", gene)) %>% 
+    map(pivot_wider, names_from = Group, values_from = 3) %>% 
+    map(mutate, difference = Treatment - Control) %>% 
+    bind_rows(.id = "farm") %>% 
+    select(-Control, -Treatment) %>% 
+    setNames(c("farm", "SamplingDay2", gene))
+}
+```
+
+Calculating genes differences between treatment and control, across farms:
+
+```{r}
+differences <- resistance_genes %>% 
+  map(calc_differences) %>% 
+  reduce(left_join, by = c("farm", "SamplingDay2"))
+```
+
+Let's do a principal component analysis (PCA) on these differences:
+
+```{r}
+pca <- differences %>% 
+  filter(if_all(.fns = Negate(is.na))) %>% 
+  select(-farm, -SamplingDay2) %>% 
+  t() %>% 
+  as.data.frame() %>% 
+  select(where(~ any(. != 0))) %>% 
+  prcomp(scale. = TRUE)
+```
+
+Preparing the PCA data to plot:
+
+```{r}
+# a hash table that converts an antimicrobial name into a class name:
+hash1 <- classes %>% 
+  filter(Antimicrobial_Class != "All") %>% 
+  unique() %$%
+  setNames(Antimicrobial_Class, EvaGreen_Name)
+
+# a hash table that converts a class name into a color:
+hash2 <- setNames(brewer.pal(11, "Set3"), unique(hash1))
+
+# PC1 and PC2 coordinates of the PCA:
+xs <- pca$x
+xs %<>% 
+  as.data.frame() %>% 
+  select(PC1, PC2) %>% 
+  mutate(class = hash1[rownames(xs)],
+         color = hash2[class])
+
+# adding the percentage of variance as metadata:
+variance <- pca$sdev^2
+variance <- variance / sum(variance)
+attr(xs, "percvar") <- round(100 * variance[1:2])
+```
+
+A function that plots the data points of the first two components of the PCA,
+highlighting a given class of antimicrobials:
+
+```{r}
+pca_biplot <- function(abclass, xs) {
+  percvar <- attr(xs, "percvar")
+  with(xs, plot(PC1, PC2, main = abclass,
+                xlab = paste0("PC1 (", percvar[1], "%)"),
+                ylab = paste0("PC2 (", percvar[2], "%)")))
+  xs %>% 
+    filter(class == abclass) %$% 
+    points(PC1, PC2, col = "red", pch = 19)
+  
+  abline(v = 0, lty = 2, col = "grey")
+  abline(h = 0, lty = 2, col = "grey")
+}
+```
+
+The number of genes per antimicrobial classes:
+
+```{r}
+(ordered_classes <- classes %>% 
+  filter(Antimicrobial_Class != "All") %>% 
+  unique() %>% 
+  group_by(Antimicrobial_Class) %>% 
+  tally() %>% 
+  arrange(desc(n)))
+```
+
+```{r}
+classes_to_plot <- ordered_classes %>%
+  filter(n > 5) %>% 
+  pull(Antimicrobial_Class)
+```
+
+The number of columns we want:
+
+```{r}
+ncols <- 2
+plt_val <- c(.13, .92, .2, .85)
+```
+
+Plotting the genes from the classes with the highest number of genes:
+
+```{r fig.height = 1.5 * ceiling(length(classes_to_plot) / ncols) * (1 + 2 / 3), fig.width = 1.5 * 2.45 * ncols}
+opar <- par(mfrow = c(ceiling(length(classes_to_plot) / ncols), ncols), plt = plt_val)
+walk(classes_to_plot, pca_biplot, xs)
+par(opar)
+```
+
+There is a group of genes that behave very similarly:
+
+```{r}
+(tmp <- filter(xs, PC1 < -3.8, PC2 > 5))
+```
+
+But that seems to be not interesting:
+
+```{r}
+ncols <- 4
+```
+
+```{r fig.height = ceiling(nrow(tmp) / ncols) * (1 + 2 / 3), fig.width = 2.45 * ncols, warning = FALSE}
+opar <- par(mfrow = c(ceiling(nrow(tmp) / ncols), ncols), plt = plt_val)
+walk(rownames(tmp), plot_differences_quantiles)
+par(opar)
+```
+
+### Calculating distances using relative variations of genes concentrations
+
+Here we basically reuse the code of the previous subsection. The function
+`calc_relvar()` basically replaces the function `calc_differences()` of the
+previous subsection:
+
+```{r}
+calc_relvar <- function(gene) {
+  genes %>% 
+    map(extract, c("SamplingDay2", "Group", gene)) %>% 
+    map(pivot_wider, names_from = Group, values_from = 3) %>% 
+    map(mutate_at, c("Control", "Treatment"), scale) %>% 
+    map(pivot_longer, -1, names_to = "group", values_to = gene) %>% 
+    bind_rows(.id = "farm")
+}
+```
+
+The function `pc1pc2()` packages part of the code of the previous subsection:
+
+```{r}
+pc1pc2 <- function(data) {
+# the PCA:
+  pca <- data %>% 
+    mutate_all(~ replace(.x, is.nan(.x), 0)) %>% # because scaling may generate NaNs
+    filter(if_all(.fns = Negate(is.na))) %>% 
+    select(-farm, -SamplingDay2, -group) %>% ###
+    t() %>% 
+    as.data.frame() %>% 
+    select(where(~ any(. != 0))) %>% 
+    prcomp(scale. = TRUE)
+
+# PC1 and PC2 coordinates of the PCA:
+  xs <- pca$x
+  xs %<>% 
+    as.data.frame() %>% 
+    select(PC1, PC2) %>% 
+    mutate(class = hash1[rownames(xs)],
+           color = hash2[class])
+
+# adding the percentage of variance as metadata:
+  variance <- pca$sdev^2
+  variance <- variance / sum(variance)
+  attr(xs, "percvar") <- round(100 * variance[1:2])
+
+# returns value:
+  xs
+}
+```
+
+Computing the coordinates on the first 2 components of the PCA:
+
+```{r}
+xs2 <- resistance_genes %>% 
+  map(calc_relvar) %>% 
+  reduce(left_join, by = c("farm", "SamplingDay2", "group")) %>% 
+  pc1pc2()
+```
+
+Plotting the genes from the classes with the highest number of genes:
+
+```{r}
+ncols <- 2
+```
+
+```{r fig.height = 1.5 * ceiling(length(classes_to_plot) / ncols) * (1 + 2 / 3), fig.width = 1.5 * 2.45 * ncols}
+opar <- par(mfrow = c(ceiling(length(classes_to_plot) / ncols), ncols), plt = plt_val)
+walk(classes_to_plot, pca_biplot, xs2)
+par(opar)
+```
+
+There is a group of genes that behave very similarly:
+
+```{r}
+(tmp <- filter(xs2, PC1 < -11))
+```
+
+Not really clear how similar they are:
+
+```{r}
+ncols <- 4
+```
+
+```{r fig.height = ceiling(nrow(tmp) / ncols) * (1 + 2 / 3), fig.width = 2.45 * ncols, warning = FALSE}
+opar <- par(mfrow = c(ceiling(nrow(tmp) / ncols), ncols), plt = plt_val)
+walk(rownames(tmp), plot_gene_all_farms, plot_frame = plot_frame2log)
+par(opar)
+```
+
+### Comparing the two
+
+```{r}
+percvar <- attr(xs, "percvar")
+with(xs, plot(PC1, PC2,
+              xlab = paste0("PC1 (", percvar[1], "%)"),
+              ylab = paste0("PC2 (", percvar[2], "%)")))
+
+abline(v = 0, lty = 2, col = "grey")
+abline(h = 0, lty = 2, col = "grey")
+
+xs %>% 
+  tibble::rownames_to_column() %>% 
+  filter(rowname %in% rownames(filter(xs, PC1 < -3.8, PC2 > 5))) %$%
+  points(PC1, PC2, col = "red", pch = 19)
+
+xs %>% 
+  tibble::rownames_to_column() %>% 
+  filter(rowname %in% rownames(filter(xs2, PC1 < -11))) %$%
+  points(PC1, PC2, col = "blue", pch = 19)
+```
+
+And the opposite:
+
+```{r}
+percvar <- attr(xs2, "percvar")
+with(xs2, plot(PC1, PC2,
+              xlab = paste0("PC1 (", percvar[1], "%)"),
+              ylab = paste0("PC2 (", percvar[2], "%)")))
+
+abline(v = 0, lty = 2, col = "grey")
+abline(h = 0, lty = 2, col = "grey")
+
+xs2 %>% 
+  tibble::rownames_to_column() %>% 
+  filter(rowname %in% rownames(filter(xs, PC1 < -3.8, PC2 > 5))) %$%
+  points(PC1, PC2, col = "red", pch = 19)
+
+xs2 %>% 
+  tibble::rownames_to_column() %>% 
+  filter(rowname %in% rownames(filter(xs2, PC1 < -11))) %$%
+  points(PC1, PC2, col = "blue", pch = 19)
+```
+
+
+### k-means
+
+```{r eval = FALSE}
+tmp <- differences %>% 
+  filter(if_all(.fns = Negate(is.na))) %>% 
+  select(-farm, -SamplingDay2) %>% 
+  t() %>% 
+  as.data.frame() %>% 
+  select(where(~ any(. != 0)))
+
+km <- kmeans(tmp, centers = 11, iter.max = 1000, nstart = 50)
+fviz_cluster(km, data = tmp)
+```
+
+```{r eval = FALSE}
+library(factoextra)
+library(NbClust)
+
+fviz_nbclust(tmp, kmeans, method = "wss")
+fviz_nbclust(tmp, kmeans, method = "silhouette")
+fviz_nbclust(tmp, kmeans, method = "gap_stat")
+
+NbClust(data = NULL, diss = NULL, distance = "euclidean",
+        min.nc = 2, max.nc = 20, method = "kmeans")
+
+NbClust(data = tmp, min.nc = 2, max.nc = 20, method = "kmeans")
 ```
